@@ -1,0 +1,4 @@
+interface:
+  display_name: "Game Keyword Scan"
+  short_description: "Scan local game keyword opportunities with evidence"
+  default_prompt: "Use $game-keyword-scan to review the latest local scan and prioritize what to validate next."
