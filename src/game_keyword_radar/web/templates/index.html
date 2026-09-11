@@ -3,32 +3,43 @@
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/static/styles.css?v={{version}}"><script defer src="/static/app.js?v={{version}}"></script></head>
 <body>
 <a href="#main" class="skip-link">跳到主要内容</a>
-<aside class="sidebar"><a class="brand" href="#overview"><span class="radar-mark">◉</span><span>GAME KEYWORD<br><strong>RADAR <small>V2</small></strong></span></a>
+<aside class="sidebar"><a class="brand" href="#overview"><span class="radar-mark">◉</span><span>GAME KEYWORD<br><strong>RADAR <small>V2.1</small></strong></span></a>
 <div class="nav-label">研究工作台</div><nav aria-label="主导航">
 <button data-view="overview" class="nav active">◎ <span>今日机会</span></button>
 <button data-view="pages" class="nav">▦ <span>页面机会图谱</span></button>
 <button data-view="queue" class="nav">☑ <span>验证队列</span><span class="count" id="queue-count">0</span></button>
 <button data-view="history" class="nav">◷ <span>历史变化</span></button>
+<button data-view="monitoring" class="nav">◌ <span>观察与监测</span></button>
 <button data-view="sources" class="nav">◈ <span>数据源与预算</span></button>
 </nav><div class="sidebar-bottom"><span class="local-dot"></span> LOCAL-FIRST<br><small>文件保存在本机，不自动建站。<br>{{version}} · {{country}}</small></div></aside>
 <div class="workspace"><header class="topbar"><span class="breadcrumb">研究 / <strong id="view-name">今日机会</strong></span><div class="top-actions"><span id="data-mode" class="pill">尚无快照</span><button id="demo" class="button subtle">体验示例</button><a id="download-report" aria-disabled="true" class="button subtle">导出报告</a></div></header>
 <main id="main"><div id="toast" role="status" aria-live="polite" hidden></div>
 <section id="scan-progress" class="notice" aria-live="polite" hidden></section>
 <section id="demo-notice" class="notice amber" hidden><strong>示例模式</strong> · 这里的游戏、数值与问题都是合成数据，只用于验证界面和流程，不代表实时机会。</section>
-<section id="legacy-notice" class="notice" hidden>正在只读查看 V1 快照。历史文件未改写；跨平台分析需要运行一次 V2 扫描。</section>
+<section id="legacy-notice" class="notice" hidden>正在只读查看旧版本快照。历史文件未改写；旧版本未记录 V2.1 准入理由，不按新规则补猜结论。</section>
 <section id="overview-view" class="view">
-<div class="hero"><div><div class="eyebrow">GAME DEMAND RADAR</div><h1>今天，什么值得<br><em>进一步研究？</em></h1><p>先发现需求，再验证页面。把注意力留给值得打开 Semrush 的游戏。</p></div>
-<form id="scan-form" class="scan-box"><strong>扫描今日机会</strong><div class="scan-fields"><label>发现上限<input id="discovery-limit" type="number" min="1" max="100" value="{{discovery_limit}}" required></label><label>深度分析<input id="deep-limit" type="number" min="0" max="30" value="{{deep_limit}}" required></label></div><label class="check"><input id="trends-enabled" type="checkbox" {% if trends_enabled %}checked{% endif %}> 可选 Google Trends</label><button id="scan-button" class="button primary" type="submit">↻ 扫描跨平台需求</button><small>凭据缺失时跳过该来源，保留其他结果。</small></form></div>
+<div class="hero"><div><div class="eyebrow">NEW SIGNALS, NOT JUST BIG GAMES</div><h1>今天，什么值得<br><em>进一步研究？</em></h1><p>先看为什么现在值得研究，再分配名额。新游、增长、新问题分别判断，不用常年热榜填满结果。</p></div>
+<form id="scan-form" class="scan-box"><strong>扫描今日机会</strong><div class="scan-fields"><label>来源列表上限<input id="discovery-limit" type="number" min="1" max="100" value="{{discovery_limit}}" required></label><label>深度分析<input id="deep-limit" type="number" min="0" max="30" value="{{deep_limit}}" required></label></div><label class="check"><input id="trends-enabled" type="checkbox" {% if trends_enabled %}checked{% endif %}> 可选 Google Trends</label><button id="scan-button" class="button primary" type="submit">↻ 发现新机会</button><small>默认 4 新游 / 3 增长 / 1 新需求 / 2 探索。缺源不淘汰，可不填满名额。</small></form></div>
 <div id="summary" class="summary-grid"></div>
-<div class="section-heading"><div><h2>优先研究的游戏</h2><p id="snapshot-time">还没有扫描记录</p></div><label class="search-label"><span class="sr-only">搜索游戏</span><input id="search" type="search" placeholder="搜索游戏或页面关键词"></label></div>
-<div class="filters" role="group" aria-label="机会筛选"><button class="chip active" data-filter="all">全部</button><button class="chip" data-filter="rising">跨平台上升</button><button class="chip" data-filter="observed">有问题证据</button><button class="chip" data-filter="existing">适合已有站</button><button class="chip" data-filter="watch">继续观察</button></div>
+<div class="section-heading"><div><h2>本轮候选与入选理由</h2><p id="snapshot-time">还没有扫描记录</p></div><label class="search-label"><span class="sr-only">搜索游戏</span><input id="search" type="search" placeholder="搜索游戏或页面关键词"></label></div>
+<div class="filters" role="group" aria-label="机会筛选"><button class="chip active" data-filter="today">今日分组</button><button class="chip" data-filter="new_release">新游</button><button class="chip" data-filter="rising">增长</button><button class="chip" data-filter="new_demand">新需求</button><button class="chip" data-filter="exploration">探索</button><button class="chip" data-filter="deferred_budget">预算延后</button><button class="chip" data-filter="monitor_only">成熟 / 观察</button><button class="chip" data-filter="all">全部实体</button></div>
+<div id="selection-funnel" class="notice"></div>
 <div id="games" class="game-grid"></div><div id="empty" class="empty"><span>◎</span><h2>从一次扫描开始</h2><p>Steam 可直接使用；Twitch 与 YouTube 在本机 .env 配置凭据。<br>也可先点“体验示例”，走完研究与验证流程。</p></div>
-<p class="footnote">Demand 分数是研究排序，不是成功率。覆盖率低表示证据不完整，不等于游戏没有需求。</p>
+<p class="footnote">首次发现不等于首次发售；来源缺失不等于零需求。精选可为 0，探索候选不冒充已验证机会。</p>
 </section>
 <section id="pages-view" class="view" hidden><div class="section-heading"><div><div class="eyebrow">EVIDENCE-TRIGGERED PAGE GRAPH</div><h1>页面机会图谱</h1><p>每个节点都说明：这个页面为什么存在。</p></div><a id="export-csv" class="button subtle" aria-disabled="true">导出关键词 CSV</a></div><div id="all-pages"></div></section>
 <section id="queue-view" class="view" hidden><div class="section-heading"><div><div class="eyebrow">MANUAL VALIDATION</div><h1>验证队列</h1><p>Semrush → 检查真实 SERP → 人工 Build / Skip。没有自动“验证通过”。</p></div><select id="queue-filter" aria-label="验证阶段"><option value="all">所有阶段</option><option value="pending_semrush">待 Semrush</option><option value="pending_serp">待 SERP</option><option value="validated">人工验证完成</option><option value="skip">已忽略</option></select></div><div id="queue-list"></div></section>
-<section id="history-view" class="view" hidden><div class="eyebrow">OBSERVATION HISTORY</div><h1>历史变化</h1><p>比较本地观测。没有 24 小时附近的样本，就不显示“24h 增长”。</p><div class="compare-controls"><label>当前快照<select id="current-snapshot"></select></label><label>对照快照<select id="baseline-snapshot"></select></label><button id="compare" class="button primary">比较变化</button></div><div id="comparison"></div><h2>全部扫描记录</h2><div id="history-list"></div></section>
+<section id="history-view" class="view" hidden><div class="eyebrow">OBSERVATION HISTORY</div><h1>历史变化</h1><p>比较本地观测。点对变化与多点窗口分开显示；规则改变不解释成需求涨跌。</p><div class="compare-controls"><label>当前快照<select id="current-snapshot"></select></label><label>对照快照<select id="baseline-snapshot"></select></label><button id="compare" class="button primary">比较变化</button></div><div id="comparison"></div><h2>全部扫描记录</h2><div id="history-list"></div></section>
 <section id="sources-view" class="view" hidden><div class="eyebrow">SOURCE HEALTH</div><h1>数据源与预算</h1><p>配置就绪不等于接口已通过实测。密钥只保存在本机，不会发到浏览器。</p><div id="source-list"></div><div id="budget-list"></div><div class="panel"><h2>本机配置</h2><p>编辑项目目录的 <code>.env</code> 设置 Twitch / YouTube 凭据，编辑 <code>radar.toml</code> 调整预算、市场和实体别名。修改后重启本地服务。</p><p>Trends 官方 Alpha 仅预留授权适配器接口；没有权限时使用可选的 legacy provider。Reddit RSS 若被拒绝访问，会降级而不是绕过限制。</p></div></section>
+<section id="monitoring-view" class="view" hidden>
+<div class="eyebrow">LOCAL OBSERVATION · EXPLICIT OPT-IN</div><h1>观察与轻量监测</h1>
+<p>每轮只做 Steam / Twitch 观测，不重跑问题源，不覆盖完整报告。服务关闭或电脑休眠期间不会继续采样。</p>
+<div id="monitor-status" class="notice" aria-live="polite">正在读取本机状态…</div>
+<div class="monitor-actions"><button data-monitor="once" class="button primary">立即观测一次</button><button data-monitor="start" class="button subtle">开启定时监测</button><button data-monitor="stop" class="button subtle">停止监测</button></div>
+<div class="panel"><h2>加入人工观察种子</h2><p>只保存有依据的游戏标识，不自动访问证据 URL；人工种子与自动发现分开记录。</p>
+<form id="seed-form"><div class="form-grid"><label>游戏名称<input name="canonical_name" required maxlength="160"></label><label>来源平台<select name="platform"><option value="steam">Steam</option><option value="twitch">Twitch</option></select></label><label>平台 ID<input name="platform_id" pattern="[0-9]{1,20}" required></label><label>证据 URL<input name="evidence_url" type="url" required></label></div><label>为什么观察<textarea name="reason" required minlength="3" maxlength="1000" rows="2"></textarea></label><button class="button primary" type="submit">保存种子</button></form></div>
+<details class="panel"><summary>本次服务的筛选与监测参数</summary><p>这是可校准的初始策略，不是爆款预测模型。修改只影响当前服务会话；历史与 radar.toml 不会被改写。定时监测开启时请先停止再改参数。</p><form id="policy-form"><label for="policy-json">策略 JSON（包含准入、监测、请求预算与增长门槛）</label><textarea id="policy-json" rows="18" spellcheck="false"></textarea><button class="button primary" type="submit">校验并应用到当前服务</button><span id="policy-hash"></span></form></details>
+<div id="watch-list"></div></section>
 <section id="detail-view" class="view" hidden><button id="back-overview" class="button subtle">← 返回游戏机会</button><div id="game-detail"></div></section>
 </main><footer>Game Keyword Radar · Search intent is validated, not assumed.</footer></div>
 <dialog id="validation-dialog"><form id="validation-form"><div class="dialog-heading"><div><div class="eyebrow">EVIDENCE BEFORE BUILD</div><h2>填写人工验证记录</h2></div><button type="button" id="close-dialog" class="icon-button" aria-label="关闭">×</button></div><p id="validation-keyword"></p><div id="validation-error" class="notice danger" role="alert" hidden></div>

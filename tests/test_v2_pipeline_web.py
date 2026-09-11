@@ -76,7 +76,8 @@ async def test_second_scan_stable_entity_ids(tmp_path):
     s=Settings(project_root=tmp_path);a=await Scanner(s,providers()).run(discovery_limit=5,deep=2)
     b=await Scanner(s,providers()).run(discovery_limit=5,deep=2)
     assert [e.slug for e in a.entities]==[e.slug for e in b.entities]
-    assert {p.id for p in a.page_opportunities}=={p.id for p in b.page_opportunities}
+    # V2.1 rotates the second exploratory entity into Deep; existing IDs remain stable.
+    assert {p.id for p in a.page_opportunities}.issubset({p.id for p in b.page_opportunities})
     assert all('24h' not in sig.history for sig in b.platform_signals)
 
 @pytest.fixture
@@ -86,14 +87,14 @@ def api(tmp_path):
 def test_empty_shell_and_version(api):
     r=api.get('/')
     assert r.status_code==200 and '今天，什么值得' in r.text
-    assert '/static/styles.css?v=2.0.0rc1' in r.text
+    assert '/static/styles.css?v=2.1.0rc1' in r.text
     assert 'id="download-report" aria-disabled="true"' in r.text
     assert api.get('/api/snapshot').status_code==404
 
 def test_web_demo_full_page_graph(api):
     d=api.post('/api/demo').json()
     assert d['run_id']=='demo-fixture' and d['is_demo'] and d['schema_version']==2
-    assert len(d['entities'])==3 and len(d['platform_signals'])==15
+    assert len(d['entities'])==5 and len(d['platform_signals'])==25
     assert api.get('/api/report').status_code==200
     assert api.get('/api/keywords.csv').headers['content-disposition'].endswith('-validation-keywords.csv"')
 

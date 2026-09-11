@@ -21,24 +21,32 @@ def mine_questions(entity, signals):
     buckets = {}
     unique = {}
     for signal in signals:
-        if signal.game_slug != entity.slug or signal.source not in {'reddit','youtube','trends'}: continue
+        if signal.game_slug != entity.slug or signal.source not in {'reddit','youtube','trends','manual'}: continue
         for item in signal.evidence:
             if item.is_inference: continue
             unique[(item.source, item.id)] = item
-    for item in unique.values():
+    # Keep the stronger source when a title is copied across providers.
+    ordered = sorted(unique.values(), key=lambda e: (e.source not in {'reddit','manual'}, e.id))
+    seen_titles = set()
+    for item in ordered:
+        title_key = re.sub(r'\W+', ' ', item.title.casefold()).strip()
+        if title_key in seen_titles:
+            continue
+        seen_titles.add(title_key)
         # Titles are deliberately used instead of unrelated quoted reply/body text.
         text = item.title
         for intent, (_, pattern) in RULES.items():
             if intent == 'codes' and re.search(r'\b(error|source|programming) codes?\b', text, re.I): continue
-            if re.search(pattern, text, re.I):
+            if item.metrics.get('intent') == intent or re.search(pattern, text, re.I):
                 buckets.setdefault(intent, []).append(item)
                 # Specific demand should not also inflate a generic beginner bucket.
-                if intent in {'workshop','calculator','tracker','codes','tier-list','locations','builds','walkthrough'}: break
+                break
     clusters = []
     for intent, examples in buckets.items():
         sources = {e.source for e in examples}
         authors = {e.author for e in examples if e.author}
         confidence = Confidence.HIGH if len(sources)>=2 and len(examples)>=3 else Confidence.MEDIUM if len(examples)>=2 else Confidence.LOW
         clusters.append(QuestionCluster(id=f'{entity.slug}:{intent}', game_slug=entity.slug, cluster_name=RULES[intent][0],
-            intent=intent, examples=examples, source_count=len(sources), question_count=len(examples), unique_authors=len(authors), confidence=confidence))
-    return sorted(clusters, key=lambda c:(-c.question_count, c.intent))
+            intent=intent, examples=examples, source_count=len(sources), question_count=sum(e.source in {'reddit','manual'} for e in examples),
+            content_proxy_count=sum(e.source not in {'reddit','manual'} for e in examples), unique_authors=len(authors), confidence=confidence))
+    return sorted(clusters, key=lambda c:(-c.question_count, -c.content_proxy_count, c.intent))

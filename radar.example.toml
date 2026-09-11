@@ -38,3 +38,43 @@ GameKitHQ = ["calculator", "tracker", "generator", "planner"]
 # subreddits = ["ExampleGame"]
 # mechanics = ["crafting"]
 # platform_ids = { steam = "123456", twitch = "987654" }
+
+# V2.1 research defaults, not validated prediction thresholds.
+[selection]
+policy_version = "selection-2.1-r1"
+new_release_days = 90
+new_release_weight = 4
+rising_weight = 3
+new_demand_weight = 1
+exploration_weight = 2
+exploration_max_share = 0.4
+deep_cooldown_hours = 24
+recent_demand_days = 14
+
+[monitoring]
+enabled = false
+interval_minutes = 120
+active_entity_limit = 80
+twitch_pages_per_game = 3
+
+[discovery_budget]
+source_row_limit = 100
+metadata_requests_per_scan = 80
+recent_release_metadata_share = 0.6
+tracked_trigger_metadata_share = 0.2
+unresolved_metadata_share = 0.2
+
+[request_budget]
+steam_attempts_per_run = 260
+twitch_attempts_per_run = 260
+count_failed_attempts = true
+
+[momentum]
+window_hours = 6
+minimum_unique_observations = 3
+minimum_span_hours = 4
+match_24h_tolerance_hours = 1
+match_7d_tolerance_hours = 2
+initial_steam_players = 250
+initial_twitch_viewers = 100
+initial_twitch_channels = 3

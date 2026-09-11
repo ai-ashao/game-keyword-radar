@@ -5,7 +5,8 @@ import re
 import unicodedata
 from difflib import SequenceMatcher
 
-from game_keyword_radar.models import GameCandidate, GameEntity
+from game_keyword_radar.models import GameCandidate, GameEntity, utc_now
+from game_keyword_radar.research_models import ReleaseDateEvidence
 
 
 def normalized(name: str) -> str:
@@ -19,7 +20,8 @@ def slugify(name: str) -> str:
 
 
 class EntityResolver:
-    def __init__(self, existing: list[GameEntity] | None = None, overrides: list[dict] | None = None):
+    def __init__(self, existing: list[GameEntity] | None = None, overrides: list[dict] | None = None, *, as_of=None):
+        self.as_of = as_of or utc_now()
         self.entities = [e.model_copy(deep=True) for e in (existing or [])]
         self.suggestions: list[dict] = []
         for override in overrides or []:
@@ -65,6 +67,8 @@ class EntityResolver:
             match = GameEntity(canonical_name=name, slug=slug)
             self.entities.append(match)
             method, confidence = "new", 1.0
+        match.first_seen_at = match.first_seen_at or self.as_of
+        match.first_seen_by_source.setdefault(platform, self.as_of)
         match.platform_ids[platform] = platform_id
         match.match_method = method
         match.entity_match_confidence = min(match.entity_match_confidence, confidence)
@@ -74,9 +78,46 @@ class EntityResolver:
 
     def from_steam(self, game: GameCandidate) -> GameEntity:
         entity = self.resolve(game.name, "steam", game.app_id)
-        entity.release_date = game.release_date
-        entity.genres = game.genres
-        entity.categories = game.categories
+        entity.discovery_sources = list(dict.fromkeys(entity.discovery_sources + game.discovery_sources))
+        entity.discovery_ranks.update(game.discovery_ranks)
+        entity.is_game = game.app_type in {"game", "demo"} if game.app_type else entity.is_game
+        prior_stage = entity.release_stage
+        if game.release_stage != "unknown":
+            entity.release_stage = game.release_stage
+        if prior_stage == "early_access" and game.release_stage == "released":
+            event = {"kind": "early_access_exit", "source_url": str(game.store_url),
+                     "observed_at": self.as_of.isoformat()}
+            if not any(x.get("kind") == "early_access_exit" for x in entity.release_events):
+                entity.release_events.append(event)
+        if game.release_date:
+            incoming = ReleaseDateEvidence(
+                date=game.release_date, raw_text=game.release_date_raw or game.release_date.isoformat(),
+                precision=game.release_date_precision, source="steam", source_url=game.store_url,
+                checked_at=game.metadata_captured_at or game.collected_at)
+            previous = entity.platform_release_dates.get("steam")
+            # An app's later advertised date must not erase an older playable release.
+            # Record the changed platform assertion instead of silently rejuvenating it.
+            retain_old = (previous and previous.date and previous.source_url
+                          and previous.precision == "day" and previous.date < game.release_date)
+            if retain_old:
+                event = {"kind": "platform_date_changed", "old_date": previous.date.isoformat(),
+                         "reported_date": game.release_date.isoformat(), "source_url": str(game.store_url),
+                         "observed_at": self.as_of.isoformat()}
+                if not any(x.get("reported_date") == event["reported_date"] and
+                           x.get("kind") == event["kind"] for x in entity.release_events):
+                    entity.release_events.append(event)
+                entity.release_date = previous.date
+            else:
+                entity.platform_release_dates["steam"] = incoming
+                entity.release_date = game.release_date
+        if game.release_stage == "demo" and not any(x.get("kind") == "demo" for x in entity.release_events):
+            entity.release_events.append({"kind": "demo", "source_url": str(game.store_url)})
+        # Missing metadata from a failed provider must not destroy an earlier profile.
+        if game.genres:
+            entity.genres = game.genres
+        if game.categories:
+            entity.categories = game.categories
         entity.mechanics = list(dict.fromkeys(entity.mechanics + game.mechanics))
-        entity.understanding_confidence = game.understanding_confidence
+        if game.genres or game.categories or game.mechanics:
+            entity.understanding_confidence = game.understanding_confidence
         return entity

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import time
@@ -32,7 +33,7 @@ def safe_error(exc: Exception) -> str:
 
 def missing(source: str, entity: GameEntity, market: str, status: SourceState, note: str) -> PlatformSignal:
     return PlatformSignal(source=source, game_slug=entity.slug, market=market, status=status,
-                          notes=[note], entity_match_confidence=entity.entity_match_confidence)
+                          notes=[note], failure_reason=note, entity_match_confidence=entity.entity_match_confidence)
 
 
 class JsonCache:
@@ -63,22 +64,44 @@ class HttpProvider:
     def __init__(self, settings: Settings, client: httpx.AsyncClient | None = None):
         self.settings = settings
         self.client = client or httpx.AsyncClient(timeout=settings.request_timeout, follow_redirects=False,
-            headers={"User-Agent": "GameKeywordRadar/2.0 local research tool"})
+            headers={"User-Agent": "GameKeywordRadar/2.1 local research tool"})
         self.owns_client = client is None
         self.cache = JsonCache(settings.data_dir / "cache")
         self.calls = 0
+        self.rate_limited_until = 0.0
         self.cache_hits = 0
 
     async def close(self):
         if self.owns_client:
             await self.client.aclose()
 
-    async def get_json(self, url: str, *, params: Any = None, headers: dict | None = None) -> dict:
-        # No invisible retries: each attempted call counts against a provider's budget.
+    def consume_attempt(self) -> None:
+        limit = (self.settings.request_budget.steam_attempts_per_run if self.name == "steam"
+                 else self.settings.request_budget.twitch_attempts_per_run if self.name == "twitch" else None)
+        if limit is not None and self.calls >= limit:
+            raise BudgetExceeded(f"{self.name} request-attempt budget exhausted")
+        if self.rate_limited_until > time.time():
+            raise ProviderError(f"{self.name}: rate_limited; wait for reset")
         self.calls += 1
-        response = await self.client.get(url, params=params, headers=headers)
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, dict):
-            raise ProviderError("Invalid upstream JSON shape")
-        return payload
+
+    async def get_json(self, url: str, *, params: Any = None, headers: dict | None = None) -> dict:
+        # Small reset delays may be retried once; every attempt including failures is charged.
+        for attempt in range(2):
+            self.consume_attempt()
+            response = await self.client.get(url, params=params, headers=headers)
+            if response.status_code == 429:
+                try:
+                    reset = float(response.headers.get("Ratelimit-Reset", time.time() + 60))
+                    delay = float(response.headers.get("Retry-After", max(0, reset-time.time())))
+                except ValueError:
+                    delay = 60
+                self.rate_limited_until = time.time() + max(1, delay)
+                if attempt == 0 and 0 < delay <= 2:
+                    await asyncio.sleep(max(1, delay))
+                    continue
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, dict):
+                raise ProviderError("Invalid upstream JSON shape")
+            return payload
+        raise ProviderError("Bounded retry exhausted")

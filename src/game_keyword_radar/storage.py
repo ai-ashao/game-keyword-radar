@@ -11,7 +11,7 @@ from uuid import uuid4
 import fcntl
 
 from game_keyword_radar.config import Settings
-from game_keyword_radar.models import ScanSnapshot, SnapshotSummary, GameEntity, ValidationRecord
+from game_keyword_radar.models import ScanSnapshot, SnapshotSummary, GameEntity, ValidationRecord, MonitoringSnapshot, GameAnnotation
 
 
 class SnapshotStore:
@@ -83,6 +83,11 @@ class SnapshotStore:
                 self._atomic_json(self.settings.data_dir / "latest.json", payload)
         self._atomic_json(self.settings.data_dir / "history-index.json",
                           [s.model_dump(mode="json") for s in self.list_snapshots()])
+        if snapshot.analysis_version == "2.1":
+            self._atomic_json(self.settings.data_dir / "selection" / f"{snapshot.run_id}.json", {
+                "run_id": snapshot.run_id, "as_of": snapshot.generated_at.isoformat(),
+                "summary": snapshot.selection_summary, "before_deep": snapshot.before_deep_selection,
+                "after_deep": snapshot.after_deep_assessment})
         return processed
 
     def load_latest(self) -> ScanSnapshot | None:
@@ -143,8 +148,8 @@ class SnapshotStore:
                     language=snapshot.language,
                     is_demo=snapshot.is_demo,
                     state=snapshot.state,
-                    games_count=len(snapshot.games),
-                    opportunities_count=len(snapshot.opportunities),
+                    games_count=len(snapshot.entities) if snapshot.schema_version == 2 else len(snapshot.games),
+                    opportunities_count=len(snapshot.page_opportunities) if snapshot.schema_version == 2 else len(snapshot.opportunities),
                 )
             )
         return sorted(summaries, key=lambda item: item.generated_at, reverse=True)
@@ -160,3 +165,84 @@ class SnapshotStore:
         except (OSError, ValueError):
             return None
         return snapshot if snapshot.run_id == run_id else None
+
+
+    def save_monitoring(self, snapshot: MonitoringSnapshot) -> Path:
+        if not self._safe_run_id(snapshot.run_id):
+            raise ValueError("Invalid monitoring run ID")
+        path = self.settings.data_dir / "observations" / snapshot.generated_at.date().isoformat() / f"{snapshot.run_id}.json"
+        payload = snapshot.model_dump(mode="json")
+        if path.exists() and json.loads(path.read_text()) != payload:
+            raise ValueError("Monitoring run IDs are immutable")
+        self._atomic_json(path, payload)
+        self._atomic_json(self.settings.data_dir / "latest-monitoring.json", payload)
+        return path
+
+    def load_monitoring(self) -> MonitoringSnapshot | None:
+        path = self.settings.data_dir / "latest-monitoring.json"
+        if not path.is_file():
+            return None
+        try:
+            return MonitoringSnapshot.model_validate_json(path.read_text())
+        except (OSError, ValueError):
+            return None
+
+    def history_records(self, *, as_of: datetime, is_demo: bool = False, country: str | None = None,
+                        language: str | None = None) -> list:
+        """Read original evidence, without migrating it or using later observations."""
+        records = []
+        for summary in self.list_snapshots():
+            if summary.generated_at > as_of or summary.is_demo != is_demo:
+                continue
+            if country and summary.country != country or language and summary.language != language:
+                continue
+            item = self.load_snapshot(summary.run_id)
+            if item:
+                records.append(item)
+        root = self.settings.data_dir / "observations"
+        for path in root.glob("*/*.json"):
+            try:
+                item = MonitoringSnapshot.model_validate_json(path.read_text())
+            except (OSError, ValueError):
+                continue
+            if item.generated_at > as_of or item.is_demo != is_demo:
+                continue
+            if country and item.country != country or language and item.language != language:
+                continue
+            records.append(item)
+        return sorted(records, key=lambda x: x.generated_at)
+
+    def load_annotations(self, *, is_demo: bool = False) -> dict[str, GameAnnotation]:
+        path = self.settings.data_dir / ("annotations-demo.json" if is_demo else "annotations.json")
+        if not path.is_file():
+            return {}
+        try:
+            values = json.loads(path.read_text())
+            return {key: GameAnnotation.model_validate(value) for key, value in values.items()}
+        except (OSError, ValueError):
+            raise ValueError("Annotation registry is unreadable; repair it before writing")
+
+    def save_annotation(self, annotation: GameAnnotation, *, locked: bool = False) -> None:
+        def write():
+            values = self.load_annotations(is_demo=annotation.is_demo)
+            values[annotation.game_slug] = annotation
+            path = self.settings.data_dir / ("annotations-demo.json" if annotation.is_demo else "annotations.json")
+            self._atomic_json(path, {key: item.model_dump(mode="json") for key, item in values.items()})
+        if locked:
+            write()
+        else:
+            with self.scan_lock():
+                write()
+
+    def monitoring_state(self) -> dict:
+        path = self.settings.data_dir / "monitoring-state.json"
+        if not path.is_file():
+            return {}
+        try:
+            value = json.loads(path.read_text())
+            return value if isinstance(value, dict) else {}
+        except (OSError, ValueError):
+            raise ValueError("Monitoring state is unreadable")
+
+    def save_monitoring_state(self, state: dict) -> None:
+        self._atomic_json(self.settings.data_dir / "monitoring-state.json", state)

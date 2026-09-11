@@ -5,6 +5,8 @@ from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, HttpUrl, model_validator
+from game_keyword_radar.research_models import (ReleaseDateEvidence, LifecycleAssessment,
+    MomentumAssessment, SelectionDecision)
 
 
 def utc_now() -> datetime:
@@ -64,6 +66,12 @@ class TrendSignal(BaseModel):
 
 
 class GameCandidate(BaseModel):
+    # New provenance fields do not alter V1's release_date interpretation.
+    release_stage: Literal["released", "early_access", "demo", "upcoming", "unknown"] = "unknown"
+    release_date_precision: Literal["day", "month", "unknown"] = "day"
+    release_date_raw: str = ""
+    metadata_captured_at: datetime | None = None
+    app_type: str = "game"
     app_id: str
     name: str
     discovery_sources: list[str] = Field(default_factory=list)
@@ -157,6 +165,22 @@ class Opportunity(BaseModel):
 
 
 class GameEntity(BaseModel):
+    first_seen_at: datetime | None = None
+    first_seen_by_source: dict[str, datetime] = Field(default_factory=dict)
+    platform_release_dates: dict[str, ReleaseDateEvidence] = Field(default_factory=dict)
+    first_public_playable_at: date | None = None
+    release_stage: Literal["released", "early_access", "demo", "upcoming", "unknown"] = "unknown"
+    release_date_basis: Literal["verified_public", "platform_reported", "manual_verified", "unknown"] = "unknown"
+    release_sources: list[str] = Field(default_factory=list)
+    release_date_conflict: bool = False
+    release_events: list[dict[str, Any]] = Field(default_factory=list)
+    last_observed_at: datetime | None = None
+    last_deep_analyzed_at: datetime | None = None
+    last_deep_trigger_fingerprint: str = ""
+    manual_labels: list[str] = Field(default_factory=list)
+    discovery_sources: list[str] = Field(default_factory=list)
+    discovery_ranks: dict[str, int] = Field(default_factory=dict)
+    is_game: bool | None = None
     canonical_name: str
     slug: str
     aliases: list[str] = Field(default_factory=list)
@@ -188,6 +212,12 @@ class EvidenceItem(BaseModel):
 
 
 class PlatformSignal(BaseModel):
+    observation_id: str | None = None
+    metric_scope: dict[str, Any] = Field(default_factory=dict)
+    scope_version: str = "legacy"
+    window_started_at: datetime | None = None
+    window_finished_at: datetime | None = None
+    failure_reason: str | None = None
     source: str
     game_slug: str
     captured_at: datetime = Field(default_factory=utc_now)
@@ -204,6 +234,8 @@ class PlatformSignal(BaseModel):
 
 
 class QuestionCluster(BaseModel):
+    content_proxy_count: int = Field(default=0, ge=0)
+    trigger_freshness: str = "unknown"
     id: str
     game_slug: str
     cluster_name: str
@@ -228,6 +260,11 @@ class DemandScore(BaseModel):
 
 
 class PageOpportunity(BaseModel):
+    content_proxy_count: int = Field(default=0, ge=0)
+    question_count: int = Field(default=0, ge=0)
+    trigger_freshness: str = "unknown"
+    event_id: str | None = None
+    demand_support: dict[str, float | None] = Field(default_factory=dict)
     id: str
     game_slug: str
     page_type: str
@@ -250,6 +287,9 @@ class PageOpportunity(BaseModel):
 
 
 class GameOpportunity(BaseModel):
+    selection: SelectionDecision | None = None
+    momentum: MomentumAssessment | None = None
+    lifecycle: LifecycleAssessment | None = None
     game_slug: str
     demand: DemandScore
     page_ids: list[str] = Field(default_factory=list)
@@ -261,6 +301,9 @@ class GameOpportunity(BaseModel):
 
 
 class ValidationRecord(BaseModel):
+    entry_origin: Literal["automatic", "manual"] = "manual"
+    analysis_version: str | None = None
+    selection_policy_version: str | None = None
     source_run_id: str = ""
     page_id: str
     game_slug: str
@@ -301,6 +344,13 @@ class ValidationRecord(BaseModel):
 
 
 class ScanSnapshot(BaseModel):
+    analysis_version: str | None = None
+    selection_policy_version: str | None = None
+    policy_config_hash: str | None = None
+    selection_decisions: list[SelectionDecision] = Field(default_factory=list)
+    selection_summary: dict[str, Any] = Field(default_factory=dict)
+    before_deep_selection: dict[str, Any] = Field(default_factory=dict)
+    after_deep_assessment: dict[str, Any] = Field(default_factory=dict)
     schema_version: str | int = "1.0"
     run_id: str
     generated_at: datetime = Field(default_factory=utc_now)
@@ -383,3 +433,54 @@ class SnapshotComparison(BaseModel):
     falling_opportunities: int = Field(ge=0)
     game_changes: list[GameSnapshotChange] = Field(default_factory=list)
     opportunity_changes: list[OpportunitySnapshotChange] = Field(default_factory=list)
+
+
+class MonitoringSnapshot(BaseModel):
+    schema_version: int = 1
+    analysis_version: str = "2.1"
+    run_id: str
+    generated_at: datetime = Field(default_factory=utc_now)
+    country: str
+    language: str
+    is_demo: bool = False
+    entity_slugs: list[str] = Field(default_factory=list)
+    platform_signals: list[PlatformSignal] = Field(default_factory=list)
+    source_statuses: list[SourceStatus] = Field(default_factory=list)
+    raw_metadata: dict[str, Any] = Field(default_factory=dict)
+    errors: list[str] = Field(default_factory=list)
+
+
+class GameAnnotation(BaseModel):
+    """An explicit user action; never disguised as automatically collected facts."""
+    game_slug: str
+    is_demo: bool = False
+    watch: bool = False
+    ignored: bool = False
+    research_requested_at: datetime | None = None
+    research_consumed_at: datetime | None = None
+    reason: str = Field(default="", max_length=2000)
+    evidence_url: HttpUrl | None = None
+    evidence_published_at: datetime | None = None
+    intent: str | None = Field(default=None, max_length=80)
+    first_public_playable_at: date | None = None
+    release_stage: Literal["released", "early_access", "demo", "upcoming", "unknown"] = "unknown"
+    platform_ids: dict[str, str] = Field(default_factory=dict)
+    aliases: list[str] = Field(default_factory=list, max_length=30)
+    non_game: bool = False
+    checked_at: datetime = Field(default_factory=utc_now)
+
+    @model_validator(mode="after")
+    def require_provenance(self):
+        if (self.first_public_playable_at or self.platform_ids or self.aliases or self.non_game or self.intent or self.release_stage != "unknown"):
+            if not self.evidence_url or not self.reason.strip():
+                raise ValueError("Manual identity/release/intent changes require a source URL and reason")
+        if self.research_requested_at and not self.reason.strip():
+            raise ValueError("Manual research needs a reason")
+        for platform, value in self.platform_ids.items():
+            if platform not in {"steam", "twitch", "igdb"} or not value.isdigit():
+                raise ValueError("Platform IDs must be numeric steam/twitch/igdb identifiers")
+        for timestamp in (self.checked_at, self.evidence_published_at, self.research_requested_at,
+                          self.research_consumed_at):
+            if timestamp and timestamp.tzinfo is None:
+                raise ValueError("Evidence timestamps must contain a timezone")
+        return self

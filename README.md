@@ -1,121 +1,86 @@
-# Game Keyword Radar V2 · 2.0.0rc1
+# Game Keyword Radar V2.1 · 2.1.0rc1
 
-本地优先的 **Game Demand Radar + Keyword / Page Opportunity Research Workbench**。
+**先有入选理由，再分配研究预算。** 本地优先的游戏需求雷达与关键词／页面研究工作台，不是热榜聚合，也不预测爆款概率。
 
-从 Steam / Twitch 发现游戏，以可选 YouTube / Reddit / Trends 信号判断玩家在寻找什么，再生成带证据的 Page Graph，进入人工 Semrush / SERP 验证。日常入口是浏览器，不是命令行。
+发布状态：**RC**。新增筛选逻辑已通过本轮离线回归和 Chromium 离线 DOM/ASGI 集成检查；真实 Steam + Twitch + YouTube 联合链路、跨日窗口和人工业务有用性尚未通过本环境验收。见 `docs/V2_1_ACCEPTANCE.md`，不把 Demo 当作实时数据。
 
-> **发布状态：Release Candidate。代码与离线回归已完成；真实 Steam + Twitch + YouTube 联合扫描尚未通过当前交付环境验收。** 不要把 Demo 当作实时机会。详见 `docs/V2_ACCEPTANCE.md`。
+## 启动与升级
 
-## 启动
-
-需要 Python 3.11+，推荐 macOS / Linux。本版本的本机互斥锁使用标准库 `fcntl`，Windows 原生 Python 暂不在支持范围。
+Python 3.11+，macOS / Linux；本地跨进程锁使用 `fcntl`，不支持 Windows 原生 Python。已有项目请先停止服务，使用交付包的 `apply_upgrade.py --check/--apply`，不要覆盖本机 `.env`、`radar.toml`、data 或 reports。
 
 ```bash
 cd game-keyword-radar
+# 已有虚拟环境就继续使用；没有时才创建。
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e '.[dev]'
-# 仅在尚无本机配置时复制，勿覆盖已经填写的密钥。
 test -f .env || cp .env.example .env
 test -f radar.toml || cp radar.example.toml radar.toml
 game-radar serve
 ```
 
-浏览器打开 `http://127.0.0.1:3000`。可以先点 **体验示例**，查看游戏详情、五个平台卡片、页面证据、验证队列和历史比较。服务仅绑定回环地址，没有登录系统，不应暴露到公网。
+打开 `http://127.0.0.1:3000`。先体验明确标记的合成示例；要查看当前数据，需要点击一次新的真实扫描。旧快照只读兼容，不会被追溯改写为 V2.1 判断。服务仅绑定回环地址，没有登录系统，不应暴露到公网。
 
-`.env` 支持以下凭据；现有环境变量优先，不把密钥返回给前端、写进报告或 raw evidence。
+## 这次修正了什么
 
-```dotenv
-TWITCH_CLIENT_ID=
-TWITCH_CLIENT_SECRET=
-YOUTUBE_API_KEY=
-```
+Steam 近期发行入口／Twitch 类别／本地观察项 → 游戏身份和发行阶段 → Steam / Twitch 定向轻量观测 → **先比较历史** → 四通道准入与预算 → YouTube / Reddit / 可选 Trends → Page Graph → 人工 Semrush / SERP。
 
-Steam 无需上述凭据。Twitch / YouTube 未配置时显示 `unavailable`，不阻止其他来源。Trends 默认关闭，需要时安装 `python -m pip install -e '.[trends]'`，再在网页开启。Reddit RSS 是 best-effort，可能返回 403 / 429；程序不会绕过访问限制。
+已知成熟游戏只有在线人数多、观看人数多时保留观察，不靠旧 Demand 分占据今日机会。新游不在 Twitch Top Games，也可按游戏 ID 定向观察。日期未知、低基数、单主播集中等有解释的弱信号保留探索，而不是要求五源齐全后才入选。
 
-## 浏览器工作流
+默认 Deep=10 时为新游4、增长3、老游新需求1、探索2。小预算采用最大余数法；空缺有序复用，自动探索最多 `ceil(0.4*N)`，可以留下空位。人工强制研究单独标记并占本轮预算。重复触发的自动 Deep 冷却24小时；具体阈值是待校准的初始规则。
 
-**扫描 → 今日机会 → 游戏详情 → 问题簇 / Page Graph → 加入验证队列 → 人工填写 Semrush / SERP → Build / Skip。**
+## 浏览器日常工作流
 
-首页按游戏研究优先级排序，展示 Demand、来源覆盖率、页面数量与行动建议。详情页明确区分实时观测、历史可比变化、样本下限和缺失值。Page Graph 的每个节点均带 `WHY THIS PAGE EXISTS`，区分真实问题、答案型视频代理与玩法推测。
+“今日机会”显示分组、WHY NOW、来源数、增长状态和页面证据；“成熟／观察”“预算延后”“全部实体”保留未精选条目。游戏详情中的旧 Demand 是折叠诊断，不代表爆发概率。
 
-验证队列存入独立 JSON，不改写扫描快照。进入“待 SERP”需要 Semrush 搜索量、证据与检查时间；真实观察到的 `0` 是合法值。进入“人工验证完成”还需要至少三个不同的已检查自然结果 URL、SERP 笔记、检查时间与明确决策理由。此门禁检查记录完整性，不声称系统自动核实了人工输入。
+“观察与监测”可以保存人工游戏种子、来源 URL、观察标签、发行／别名／平台 ID 纠正。新种子在下一轮参与发现；不会自动抓取用户粘贴的任意 URL。人工发行与问题事实必须提供理由与出处，具体问题还需要发布时间。
 
-## 已有站点优先
+该页可启停本地监测，或只运行一轮。默认不自动开启。只有本地服务存活且电脑没有休眠时才采样；恢复后只做下一轮实际请求，记录缺口，不补造过去样本。轻量监测不调用 YouTube / Reddit / Trends，也不覆盖最近完整报告。
 
-默认配置将 Workshop / SteamCMD 类问题路由至 WorkshopFetch，游戏计算器 / Tracker / Planner 至 GameKitHQ，明确的 Fortnite Sprite 意图至 FN Sprite Hub。匹配到已有站点仍然需要验证，`EXPAND_EXISTING_SITE` 不代表立即开发。
+策略编辑器只改变**当前服务会话**，重启不持久化。长期配置请编辑 `radar.toml`。未知段名、未知字段、非法配额比例会报错。
 
-编辑 `radar.toml` 可调整规则，并通过 `[[entity_overrides]]` 配置别名、已核实的平台 ID、游戏专属 subreddit 和查询词。模糊匹配仅输出建议，不自动合并游戏。
+## 数据来源与凭据
 
-## 请求预算
+`.env` 中保留原有 `TWITCH_CLIENT_ID`、`TWITCH_CLIENT_SECRET`、`YOUTUBE_API_KEY`。Steam 不需要这三个值；Twitch 或 YouTube 未配置只会降级，不以缺失判定零需求。App Token 的缓存和过期更新保留在本地私有目录，密钥不进入前端、快照或报告。
 
-默认 Broad Discovery 上限 80 个实体，Deep Analysis 10 个、最大 30。非深度候选的缺失深层数据标为“未采集”，不是零需求。
+Twitch 观众数／频道数是采集窗口观测；未完成分页时标成样本下限。类别排名与单游戏流观测分开，缺席 Top K 不等于0观众。Top1 / Top3、非头部观众、频道ID集合用于解释广度，不是搜索量。
 
-YouTube 默认每次扫描最多 20 次 `search.list`、本机配额日最多 80 次，另有 30 次 `videos.list` 上限。计数单位是 API 调用次数，不硬编码旧的 Google 搜索配额点数规则。缓存命中不再次消耗调用预算；失败请求仍记为尝试。配额日按 America/Los_Angeles 计算。本地计数不包括同一 Google 项目的其他客户端。
+Reddit RSS 保留 best-effort 与显式专属社区配置；403 / 429 不绕过限制。Trends Legacy 是可选依赖；Official Provider 仍需授权适配器，并未自动开通官方 Alpha。YouTube 视频属于内容代理，不能计作真实玩家提问。
 
-Twitch 默认全局与单游戏最多各 3 页。未消费完分页时观众 / 频道数标为**样本下限**，不会冒充游戏全量。单主播占比过高会降低来源分。
+## 历史与判断
 
-## 数据与历史
+首次本机发现与首次公开发行分开。平台近期发行但全球首发未知可暂入新游通道；明确旧发行、移植、改名或转正式事件不能重置游戏年龄。历史 app 再次返回较新的发行日期时保留旧来源记录。
 
-```text
-data/
-  raw/<source>/...json       # 上游证据，唯一文件名，不覆盖既有 raw
-  cache/<source>/...json     # 公开来源缓存
-  private/twitch-token-...  # 仅本机 token，文件权限 0600
-  budgets/                  # 请求预算账本
-  processed/<run>-snapshot.json
-  latest.json               # 上次可用快照；空失败不会覆盖
-  latest-live.json
-  latest-demo.json
-  last-attempt.json          # 最近尝试，可能失败
-  entities.json
-  history-index.json
-  validation/               # 独立人工记录
-reports/
-  <run>-game-keywords.md
-```
+默认轻量周期2小时；合格24h/7d比较使用6小时窗口、至少3个独立观测、跨度至少4小时、一对一时间匹配与中位数。低基数百分比为空；单点、日内苗头和部分样本不认证持续增长。无历史为 unknown，不写 stable。跨平台冲突为 mixed，不平均抵消。
 
-V1 / V1.1 快照只读兼容；加载不会迁移或改写文件。V2 的同一 Run ID 不允许覆盖。Demo 不覆盖已有 Live 默认视图。
+V1 / V2 旧快照继续只读。V2 历史计数改为 entities/page_opportunities，Twitch-only 不再漏计；unchanged、分数变化、排名变化和页面变化分别统计；策略、覆盖或口径改变时不解释为需求涨跌。
 
-24h 变化需要目标时间前后 6 小时内的可比观测，7d 需要目标时间前后 24 小时内的可比观测；没有合适样本就不计算。前一次扫描独立标为 `previous`。市场、数据类型和来源采样范围必须一致；相同缓存观测不会产生增长，零基线不会生成无穷增长率。
+## 存储与预算
 
-## 评分边界
+`data/processed` 是完整报告；`data/observations/<date>` 是独立轻量快照，`latest-monitoring.json` 不覆盖 `latest.json`。`selection/<run>.json` 保存准入和分配，`annotations` 与 `validation` 保存人工记录；Demo / Live 分开。无可用实体的失败不覆盖最近有效 Live。
 
-Steam 25、Twitch 20、Trends 15、YouTube 15、Reddit 15，跨平台方向确认最多 10。各来源先在自己的量纲内归一化，再加权；缺失 component 为 `null`。Demand 按可用来源权重归一化，同时显示覆盖率。完整公式见 `docs/V2_SCORING.md`。
+Steam、Twitch 默认每轮各260次网络尝试预算，失败和 Token 请求计入，缓存命中不计入。来源列表、元数据和活动监测池分别计数，详情补全优先近期发行入口。YouTube 沿用本机调用次数和配额日账本。来源失败不会伪造成功数据。
 
-页面分与 Demand 分分离；页面预验证分最多 69，原始分仅供研究排序。没有 Semrush / SERP，不输出自动 Build。视频播放数、直播观众数、Trends 指数不换算成 Google 月搜索量。分数不是成功率。
-
-## CLI 与测试
+## CLI 与验收
 
 ```bash
-game-radar sources                         # 仅配置就绪状态，不是联网通过证明
-game-radar scan --discovery-limit 80 --deep 10
-game-radar scan --limit 10                 # V1 参数保留，limit 最大 30
-game-radar demo
-game-radar report
-game-radar validate                        # 查看人工队列
-game-radar compare CURRENT_RUN BASELINE_RUN
+game-radar scan --deep 10 --selection-profile opportunity
+game-radar monitor-once
+game-radar candidates --lane exploration
+game-radar explain GAME_SLUG --run-id RUN_ID
+game-radar sources
 python -m pytest
-```
-
-新增测试默认断开网络，用 MockTransport、ASGI TestClient 和合成快照验证。`tests/test_v1_contracts.py` 覆盖现有 V1 接口约定，不删除原仓库测试。附带浏览器检查为真实 Chromium DOM/JS + ASGI 桥接，**不是浏览器直接联网验收**；见验收记录。
-
-真实验收必须另外运行：
-
-```bash
 python scripts/live_acceptance.py
 ```
 
-只有实际获取到 Steam、Twitch、YouTube 三种可用观测，脚本才退出 0。缺凭据、网络失败或只有示例数据都不算通过。
+`game-radar sources` 仅说明配置，不证明真实 API 成功。实时验收脚本只有 Steam 玩家、Twitch 定向观测、一个双源映射实体以及真实 YouTube 出处都存在才通过；L2 跨日和 L4 人工有用性仍另记。
 
-## 职责边界
+浏览器离线集成（可选安装 Playwright，使用本机 Chromium）与实际浏览器 HTTP 验收是两件事，见 `scripts/browser_smoke.py --help`。默认 pytest 离线；本轮具体日志与限制见验收记录。
 
-本项目不生成小黑盒文章、公众号文章、新闻标题或社媒内容；这些属于独立 `game-content-radar`。不依赖该仓库。不自动建站、购买 API、抓取大规模 SERP，也不引入云数据库或用户系统。
+## 已保留的边界
 
-## 官方接口参考
+所有页面仍需人工 Semrush / SERP 验证，预验证分上限69。没有证据不自动 Build；粘贴表单只校验记录完整性，不声称系统替人核实了搜索结果。
 
-- Twitch Helix / OAuth: https://dev.twitch.tv/docs/api/reference/ 、https://dev.twitch.tv/docs/authentication/getting-tokens-oauth/
-- YouTube search / videos: https://developers.google.com/youtube/v3/docs/search/list 、https://developers.google.com/youtube/v3/docs/videos/list
-- Google Trends Alpha: https://developers.google.com/search/apis/trends
+本仓库不生成小黑盒／公众号／社媒文章，不依赖 `game-content-radar`，不绑定 ShipLean，不引入云数据库或用户系统。全网首发时间考证、全量 Twitch 数据、自动因果解释、预测准确率和自动专属社区发现均不是已交付能力。
 
-OfficialTrendsProvider 仅提供授权适配器注入接口；没有官方 Alpha 权限和适配器时明确返回 unavailable，不伪造公共接口。
+规格：`docs/V2_1_PLAN.md`；实施映射：`docs/V2_1_IMPLEMENTATION.md`；验收：`docs/V2_1_ACCEPTANCE.md`。

@@ -1,9 +1,5 @@
-# Scoring boundaries
+# V2.1 ranking boundary
 
-Game Demand and Page Opportunity are different scores. Source weights 25/20/15/15/15 plus optional direction confirmation 10; normalize observed sources and show coverage separately. Missing is null, never zero. Counts from different platforms are not added.
+Legacy DemandScore is compatibility diagnostics, not initial admission. New release / rising / dated new demand / exploration have independent quotas4:3:1:2, with exploration cap40% and default24h cooldown. First compare compatible unique observations, then admit and allocate. Explain before_deep_selection, not a hindsight page score.
 
-A source without a valid historical baseline has no 24h/7d direction. Twitch incomplete samples are lower bounds; concentrated audiences have lower confidence. YouTube velocity is views divided by video age, not measured hourly growth. Reddit is a sampled set of titles with community bias.
-
-Page raw score is 0–100; pre-validation displayed score remains at most 69. Gameplay-only nodes are hypotheses. No score means a probability, monthly Google volume or revenue.
-
-See repository `docs/V2_SCORING.md` for implemented formulas and `docs/V2_ACCEPTANCE.md` for tested versus unverified behavior.
+No history = unknown; low base = no misleading percentage; partial/game/global samples cannot be conflated; single-source growth remains valid; concentration is a limitation, not automatic exclusion. Page score=min(69,raw supported rule score); missing evidence remains null/no awarded support, never a claim of zero demand. No automatic Build or monthly-volume conversion.

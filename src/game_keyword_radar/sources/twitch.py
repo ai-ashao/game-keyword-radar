@@ -42,6 +42,7 @@ class TwitchProvider(HttpProvider):
                     return self._token
             except (OSError, ValueError, KeyError, TypeError):
                 pass
+        self.consume_attempt()
         response = await self.client.post(TOKEN, data={'client_id':self.settings.twitch_client_id,
             'client_secret':self.settings.twitch_client_secret, 'grant_type':'client_credentials'})
         response.raise_for_status()
@@ -75,7 +76,12 @@ class TwitchProvider(HttpProvider):
         viewers = sum(max(0, int(row.get('viewer_count', 0))) for row in rows)
         channels = len({row.get('user_id') or row['id'] for row in rows})
         top = max((int(row.get('viewer_count', 0)) for row in rows), default=0)
-        return {'total_viewers': viewers, 'live_channels': channels,
+        ordered = sorted((max(0, int(row.get('viewer_count', 0))) for row in rows), reverse=True)
+        return {'observed_viewers': viewers, 'observed_live_channels': channels,
+                'top1_viewer_share': round(top/viewers,4) if viewers else None,
+                'top3_viewer_share': round(sum(ordered[:3])/viewers,4) if viewers else None,
+                'non_top1_viewers': viewers-top, 'broadcaster_ids': sorted({str(row.get('user_id') or row['id']) for row in rows}),
+                'total_viewers': viewers, 'live_channels': channels,
                 'avg_viewers_per_channel': round(viewers/channels, 2) if channels else 0,
                 'top_stream_viewers':top, 'audience_concentration': round(top/viewers, 4) if viewers else None,
                 'twitch_rank':rank, 'sampling_complete':complete, 'sampling_scope':scope,
@@ -135,21 +141,25 @@ class TwitchProvider(HttpProvider):
             return missing(self.name, entity, 'GLOBAL', SourceState.UNAVAILABLE, 'Twitch credentials are not configured')
         game_id = entity.platform_ids.get('twitch')
         if not game_id:
-            matches = await self.helix('games', {'name':entity.canonical_name})
-            if not matches['data']:
-                return missing(self.name, entity, 'GLOBAL', SourceState.INSUFFICIENT_DATA, 'No exact Twitch game match; no fuzzy merge performed')
-            exact = [g for g in matches['data'] if g['name'].casefold() == entity.canonical_name.casefold()]
-            if len(exact) != 1:
-                return missing(self.name, entity, 'GLOBAL', SourceState.INSUFFICIENT_DATA, 'Ambiguous Twitch entity')
-            game_id = exact[0]['id']
+            matches_by_id = {}
+            for name in list(dict.fromkeys([entity.canonical_name, *entity.aliases]))[:5]:
+                matches = await self.helix('games', {'name': name})
+                for game in matches['data']:
+                    if game['name'].casefold() == name.casefold():
+                        matches_by_id[game['id']] = game
+            if len(matches_by_id) != 1:
+                return missing(self.name, entity, 'GLOBAL', SourceState.INSUFFICIENT_DATA,
+                    'No unique exact Twitch name/verified-alias match; not evidence of no Twitch audience')
+            game_id = next(iter(matches_by_id))
             entity.platform_ids['twitch'] = game_id
-        key = ['game', game_id, self.settings.twitch_sample_pages]
+        key = ['game-v21', game_id, self.settings.twitch_pages]
         cached = self.cache.get(self.name, key, self.settings.twitch_cache_ttl_seconds)
         if cached:
             signal = PlatformSignal.model_validate(cached['payload'])
             return signal.model_copy(update={'game_slug':entity.slug, 'cache_hit':True})
+        started = datetime.now().astimezone()
         streams, cursor, complete = [], None, False
-        for _ in range(self.settings.twitch_sample_pages):
+        for _ in range(self.settings.twitch_pages):
             params = {'first':100, 'game_id':game_id}
             if cursor: params['after'] = cursor
             result = await self.helix('streams', params)
@@ -159,13 +169,44 @@ class TwitchProvider(HttpProvider):
                 complete = True
                 break
         metrics = self.aggregate(streams, complete=complete, scope='game_streams')
-        metrics['sample_page_limit'] = self.settings.twitch_sample_pages
+        metrics['sample_page_limit'] = self.settings.twitch_pages
+        metrics['game_id'] = game_id
         signal = PlatformSignal(source=self.name, game_slug=entity.slug, market='GLOBAL', metrics=metrics,
+            scope_version='2.1', metric_scope={'metric':'single_game_stream_observation','game_id':game_id},
+            window_started_at=started, window_finished_at=datetime.now().astimezone(),
             status=SourceState.OK if complete else SourceState.PARTIAL,
             confidence=Confidence.MEDIUM if complete and metrics['breadth_confidence'] != 'low' else Confidence.LOW,
             notes=['Live observations, not a daily average. Pagination can change during collection.',
                    'Bounded sample: viewer/channel counts are lower bounds.' if not complete else 'All returned pages consumed.'])
+        from game_keyword_radar.observations import stamp_observation
+        stamp_observation(signal)
         self.raw.append({'source':'twitch', 'captured_at':signal.captured_at.isoformat(), 'status':signal.status.value,
                          'market':'GLOBAL', 'game_id':game_id, 'streams':streams})
         self.cache.put(self.name, key, signal.model_dump(mode='json'))
         return signal
+
+
+    async def discover_categories(self, limit):
+        """Category ingress only. Directed observation is independently budgeted."""
+        if not self.configured:
+            return [], []
+        key = ["categories-v21", limit]
+        cached = self.cache.get(self.name, key, self.settings.twitch_cache_ttl_seconds)
+        if cached:
+            self.cache_hits += 1
+            return cached['payload']['games'], []
+        games, cursor = [], None
+        while len(games) < limit:
+            params = {'first': min(100, limit-len(games))}
+            if cursor: params['after'] = cursor
+            result = await self.helix('games/top', params)
+            games.extend(result['data'])
+            cursor = result.get('pagination', {}).get('cursor')
+            if not result['data'] or not cursor: break
+        captured = datetime.now().astimezone().isoformat()
+        rows = [{**g, 'twitch_rank': i+1, 'rank_scope': {'requested':limit, 'returned':len(games)},
+                 'captured_at':captured, 'is_non_game': g['name'].casefold() in NON_GAMES}
+                for i, g in enumerate(games)]
+        self.raw.append({'source':'twitch', 'captured_at':captured, 'scope':'bounded_category_list', 'games':rows})
+        self.cache.put(self.name, key, {'games':rows})
+        return rows, []

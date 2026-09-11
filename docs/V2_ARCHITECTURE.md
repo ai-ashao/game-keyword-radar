@@ -1,3 +1,5 @@
+> Historical V2 RC1 reference. V2.1 implementation is governed by V2_1_PLAN.md and V2_1_IMPLEMENTATION.md; legacy Demand is no longer the initial selector.
+
 # V2 RC1 architecture
 
 ## Integration rather than a new framework

@@ -29,7 +29,7 @@ def route_existing(entity, keyword, triggers, settings):
     _, site, term = sorted(matches, reverse=True)[0]
     return site, f'Existing-site configured intent match: {term}. Expansion still requires Semrush/SERP validation.'
 
-def build_page_graph(entity, clusters, demand, settings):
+def build_page_graph(entity, clusters, demand, settings, *, decision=None):
     nodes = []
     for cluster in clusters:
         if cluster.intent not in PAGES: continue
@@ -49,8 +49,8 @@ def build_page_graph(entity, clusters, demand, settings):
         keyword = f'{entity.canonical_name} {suffix}'.lower()
         site, why = route_existing(entity, keyword, triggers, settings)
         nodes.append(dict(intent=cluster.intent, suffix=suffix, kind=kind, difficulty=difficulty, maintenance=maintenance,
-            value=value, triggers=triggers, count=cluster.question_count, source_count=cluster.source_count,
-            site=site, why=why, keyword=keyword, evidence_level='observed_question' if any(e.source=='reddit' for e in triggers) else 'observed_content_proxy'))
+            value=value, triggers=triggers, count=cluster.question_count, proxy_count=cluster.content_proxy_count, source_count=cluster.source_count,
+            site=site, why=why, keyword=keyword, evidence_level='observed_question' if any(e.source in {'reddit','manual'} for e in triggers) else 'observed_content_proxy'))
     # Keep a small, explicitly inferred tool hypothesis when mechanics are known.
     # No generic codes, tier-list or map node is ever fabricated here.
     seen = {n['intent'] for n in nodes}
@@ -64,17 +64,19 @@ def build_page_graph(entity, clusters, demand, settings):
         site, why = route_existing(entity, keyword, [trigger], settings)
         nodes.append(dict(intent=intent,suffix=suffix,kind='tool',difficulty='high' if mechanic=='rpg_builds' else 'medium',
             maintenance='medium',value='Validate the underlying gameplay system before building a calculator/planner.',
-            triggers=[trigger],count=0,source_count=0,site=site,why=why,keyword=keyword,evidence_level='hypothesis'))
+            triggers=[trigger],count=0,proxy_count=0,source_count=0,site=site,why=why,keyword=keyword,evidence_level='hypothesis'))
     pages = []
     for node in nodes:
-        is_observed = node['count']>0
+        is_observed = node['count'] + node['proxy_count'] > 0
+        support = demand_support(decision) if decision else None
+        count_for_score = node['count'] + min(3, node['proxy_count'])
         breakdown = {
-            'problem_query_evidence':min(20,8+node['count']*2+max(0,node['source_count']-1)*3) if is_observed else 2,
+            'problem_query_evidence':min(20,8+count_for_score*2+max(0,node['source_count']-1)*3) if is_observed else 2,
             'search_page_intent':20 if node['kind'] in {'tool','tracker'} else 16,
             'page_graph_breadth':min(15,len(nodes)*3),
             'build_feasibility':{'low':15,'medium':10,'high':5}[node['difficulty']],
             'maintenance_cost':{'low':10,'medium':7,'high':3}[node['maintenance']],
-            'game_demand_contribution':round((demand.score or 0)*.1*demand.coverage,2),
+            'game_demand_contribution':sum(v for v in support.values() if v is not None) if support else round((demand.score or 0)*.1*demand.coverage,2),
             'evidence_confidence':min(10,4+node['source_count']*2) if is_observed else 1,
         }
         raw = round(sum(breakdown.values()),1)
@@ -84,13 +86,39 @@ def build_page_graph(entity, clusters, demand, settings):
             trigger_signals=node['triggers'],user_problem=node['value'],page_value=node['value'],
             maintenance_level=node['maintenance'],build_difficulty=node['difficulty'],
             existing_site_fit=node['site'],route_reason=node['why'],score=min(69,raw),raw_score=raw,score_breakdown=breakdown,
-            evidence_level=node['evidence_level'],keyword_candidates=[KeywordCandidate(keyword=node['keyword'],
+            evidence_level=node['evidence_level'], question_count=node['count'], content_proxy_count=node['proxy_count'],
+            demand_support=support or {}, trigger_freshness=('dated' if any(t.published_at for t in node['triggers']) else 'unknown'), keyword_candidates=[KeywordCandidate(keyword=node['keyword'],
                 cluster=node['intent'],page_type=node['kind'],intent=node['intent'],trigger='; '.join(e.id for e in node['triggers']),
                 rationale=node['value'],build_difficulty=node['difficulty'],maintenance_level=node['maintenance'],
                 evidence_confidence=Confidence.MEDIUM if is_observed else Confidence.LOW)]))
     return sorted(pages,key=lambda p:(-p.raw_score,p.id))
 
-def route_game(entity, demand, pages):
+def demand_support(decision):
+    momentum = decision.momentum
+    return {'momentum': 6 if momentum.rising_sources else 3 if momentum.state == 'early_signal' else None,
+            'verified_recent_release': 2 if decision.lifecycle.lifecycle == 'new_release' and decision.lifecycle.recency_status == 'verified' else None,
+            'cross_platform': 2 if len(set(momentum.rising_sources)) >= 2 else None}
+
+
+def route_game(entity, demand, pages, *, decision=None):
+    if decision is not None:
+        observed = [p for p in pages if p.evidence_level != 'hypothesis' and any(e.url for e in p.trigger_signals)]
+        if decision.decision == 'excluded':
+            action, reason = 'SKIP', '人工忽略或有明确非游戏依据；不是来源缺失导致的零需求判断。'
+        elif observed and decision.eligible_lanes:
+            if any(p.existing_site_fit for p in observed):
+                action, reason = 'EXPAND_EXISTING_SITE', '具体任务适配已有站点，先验证页面关键词与SERP。'
+            elif len({p.keyword_candidates[0].cluster for p in observed if p.keyword_candidates}) >= 4:
+                action, reason = 'VALIDATE_NEW_SITE', '多个不同用户任务形成主题结构；仍需人工搜索验证。'
+            else:
+                action, reason = 'VALIDATE', '有可定位的页面任务；单一来源也可进入人工验证，不等于已知搜索量。'
+        else:
+            action, reason = 'WATCH', '；'.join(decision.reasons) or '尚缺具体需求证据。'
+        return GameOpportunity(game_slug=entity.slug, demand=demand, page_ids=[p.id for p in pages],
+            action=action, action_reason=reason, best_page_score=max((p.score for p in pages),default=None),
+            research_priority=max((p.raw_score for p in observed),default=0),
+            selection=decision, momentum=decision.momentum, lifecycle=decision.lifecycle)
+
     observed = [p for p in pages if p.evidence_level!='hypothesis']
     if observed and any(p.existing_site_fit for p in observed):
         action, reason = 'EXPAND_EXISTING_SITE', 'Observed demand fits an existing site; validate the page before expansion.'

@@ -7,6 +7,9 @@ def cell(value):
 class MarkdownReporter:
     def __init__(self,settings):self.settings=settings
     def render(self,snapshot:ScanSnapshot):
+        if snapshot.analysis_version == "2.1":
+            from game_keyword_radar.reporters.research import render_research
+            return render_research(snapshot)
         lines=[f'# Game Keyword Radar - {snapshot.generated_at.date().isoformat()}','',
             f'> Run `{snapshot.run_id}` | Market `{snapshot.country}` | Language `{snapshot.language}`','']
         if snapshot.is_demo:lines += ['> **示例数据**：游戏、数值和问题均为合成测试素材，不是实时平台事实。','']

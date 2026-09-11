@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 
 from pydantic import BaseModel, Field
+from game_keyword_radar.policy_config import (SelectionSettings, MonitoringSettings,
+    DiscoveryBudget, RequestBudget, MomentumSettings)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -81,38 +83,95 @@ class Settings(BaseModel):
         "GameKitHQ": ["calculator", "tracker", "generator", "planner"],
     })
 
+    selection: SelectionSettings = Field(default_factory=SelectionSettings)
+    monitoring: MonitoringSettings = Field(default_factory=MonitoringSettings)
+    discovery_budget: DiscoveryBudget = Field(default_factory=DiscoveryBudget)
+    request_budget: RequestBudget = Field(default_factory=RequestBudget)
+    momentum: MomentumSettings = Field(default_factory=MomentumSettings)
+
+    @property
+    def twitch_pages(self) -> int:
+        # Direct construction and old TOML keep the old setting's meaning.
+        return (self.monitoring.twitch_pages_per_game if "monitoring" in self.model_fields_set
+                else self.twitch_sample_pages)
+
+    def policy_hash(self) -> str:
+        import hashlib
+        import json
+        payload = self.public_policy()
+        return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:16]
+
+    def public_policy(self) -> dict:
+        return {key: getattr(self, key).model_dump(mode="json") for key in
+                ("selection", "monitoring", "momentum", "discovery_budget", "request_budget")}
+
     @classmethod
     def load(cls, project_root: Path | None = None) -> "Settings":
-        """Read local .env + optional radar.toml. No evaluation or shell expansion."""
+        """TOML > recognized environment > .env > defaults; never mutate os.environ.
+
+        Per-run parameters are applied by Scanner, and are recorded in the snapshot.
+        Credentials are accepted only through the environment / .env channel.
+        """
+        import json
         import shlex
         import tomllib
         root = (project_root or PROJECT_ROOT).resolve()
-        env = root / ".env"
-        if env.is_file():
-            for line in env.read_text(encoding="utf-8").splitlines():
+        file_env: dict[str, str] = {}
+        env_path = root / ".env"
+        if env_path.is_file():
+            for line in env_path.read_text(encoding="utf-8").splitlines():
                 line = line.strip()
                 if not line or line.startswith("#") or "=" not in line:
                     continue
                 key, value = line.removeprefix("export ").split("=", 1)
                 key = key.strip()
                 if not key.replace("_", "").isalnum():
-                    continue
+                    raise ValueError("Invalid .env variable name")
                 try:
                     parts = shlex.split(value, comments=True)
                 except ValueError:
-                    continue
-                os.environ.setdefault(key, " ".join(parts))
-        config = root / "radar.toml"
-        payload = tomllib.loads(config.read_text(encoding="utf-8")) if config.is_file() else {}
+                    raise ValueError(f"Invalid quoted value for {key}") from None
+                file_env[key] = " ".join(parts)
+        env = {**file_env, **os.environ}
+        nested = {"selection": SelectionSettings, "monitoring": MonitoringSettings,
+                  "momentum": MomentumSettings, "discovery_budget": DiscoveryBudget,
+                  "request_budget": RequestBudget}
+        secrets = {"twitch_client_id": "TWITCH_CLIENT_ID", "twitch_client_secret": "TWITCH_CLIENT_SECRET",
+                   "youtube_api_key": "YOUTUBE_API_KEY"}
         accepted: dict = {}
-        sections = {"sources": {k: f"{k}_enabled" for k in ["steam", "twitch", "trends", "youtube", "reddit"]},
-                    "scan": {}, "budgets": {}, "markets": {"steam_country": "country"}, "history": {}}
-        for section, mapping in sections.items():
+        for key in cls.model_fields:
+            if key in nested or key in {"project_root", "entity_overrides", "existing_sites"}:
+                continue
+            variable = secrets.get(key, "GKR_" + key.upper())
+            if variable in env:
+                value = env[variable]
+                if key in {"reddit_subreddits"}:
+                    value = json.loads(value)
+                accepted[key] = value
+        for section, model in nested.items():
+            values = {key: env["GKR_" + section.upper() + "_" + key.upper()]
+                      for key in model.model_fields
+                      if "GKR_" + section.upper() + "_" + key.upper() in env}
+            if values:
+                accepted[section] = values
+        path = root / "radar.toml"
+        payload = tomllib.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        legacy = {"sources": {k: f"{k}_enabled" for k in
+                             ["steam", "twitch", "trends", "youtube", "reddit"]},
+                  "scan": {}, "budgets": {}, "markets": {"steam_country": "country"}, "history": {}}
+        allowed = set(legacy) | set(nested) | {"entity_overrides", "existing_sites"}
+        for section in payload:
+            if section not in allowed:
+                raise ValueError(f"Unknown radar.toml section: {section}")
+        for section, mapping in legacy.items():
             for key, value in payload.get(section, {}).items():
                 target = mapping.get(key, key)
-                if target not in cls.model_fields:
-                    raise ValueError(f"Unknown radar.toml setting: {section}.{key}")
+                if target not in cls.model_fields or target in secrets or target in nested or target == "project_root":
+                    raise ValueError(f"Unknown or forbidden radar.toml setting: {section}.{key}")
                 accepted[target] = value
+        for section in nested:
+            if section in payload:
+                accepted[section] = {**accepted.get(section, {}), **payload[section]}
         for key in ("existing_sites", "entity_overrides"):
             if key in payload:
                 accepted[key] = payload[key]

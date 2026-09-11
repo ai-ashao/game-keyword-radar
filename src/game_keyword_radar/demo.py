@@ -67,8 +67,95 @@ def build_demo_snapshot(settings):
     return snapshot
 
 def save_demo(settings):
-    snapshot=build_demo_snapshot(settings)
+    snapshot=build_v21_demo_snapshot(settings)
     store=SnapshotStore(settings)
     if store.load_snapshot(snapshot.run_id):snapshot.run_id='demo-fixture-'+uuid4().hex[:8]
     store.save_snapshot(snapshot)
+    return snapshot
+
+
+def build_v21_demo_snapshot(settings):
+    """Five synthetic decision lanes, with time-consistent replay evidence."""
+    from game_keyword_radar.models import GameEntity
+    from game_keyword_radar.analyzers.candidate_selection import decide_candidate, allocate_deep
+    from game_keyword_radar.analyzers.momentum import assess_momentum
+    from game_keyword_radar.observations import stamp_observation
+    now=utc_now()
+    snapshot=build_demo_snapshot(settings)
+    snapshot.generated_at=now
+    snapshot.analysis_version='2.1'
+    snapshot.selection_policy_version=settings.selection.policy_version
+    snapshot.policy_config_hash=settings.policy_hash()
+    # Existing fixtures become: recent release, established growth, unknown exploratory.
+    for i,e in enumerate(snapshot.entities):
+        e.first_seen_at=now-timedelta(days=2)
+        e.release_stage='released' if i<2 else 'unknown'
+        e.first_public_playable_at=(now-timedelta(days=12 if i==0 else 700)).date() if i<2 else None
+        e.release_date_basis='verified_public' if i<2 else 'unknown'
+        e.release_sources=['https://example.invalid/synthetic-release'] if i<2 else []
+        if i==2: e.platform_release_dates={};e.release_date=None
+    for name,slug in [('Evergreen Arena','evergreen-arena'),('Copper Workshop','copper-workshop')]:
+        e=GameEntity(canonical_name=name,slug=slug,release_stage='released',
+            first_public_playable_at=(now-timedelta(days=2000)).date(),release_date_basis='verified_public',
+            release_sources=['https://example.invalid/synthetic-release'],first_seen_at=now,
+            discovery_sources=['fixture'],platform_ids={'steam':'fixture-'+slug},is_game=True)
+        snapshot.entities.append(e)
+        for source in ('steam','twitch','youtube','reddit','trends'):
+            metrics=({'current_players':700000,'country':settings.country} if source=='steam' else
+                     {'total_viewers':60000,'live_channels':200,'audience_concentration':.1,
+                      'sampling_complete':True,'sampling_scope':'game_streams','sample_page_limit':3} if source=='twitch' else {})
+            snapshot.platform_signals.append(PlatformSignal(source=source,game_slug=slug,origin='demo',
+                captured_at=now,market='GLOBAL',metrics=metrics,status=SourceState.OK if metrics else SourceState.SKIPPED,
+                notes=['SYNTHETIC fixture, not live data']))
+    copper=next(s for s in snapshot.platform_signals if s.game_slug=='copper-workshop' and s.source=='reddit')
+    copper.status=SourceState.OK
+    copper.metrics={'question_count':1,'unique_authors':1,'sample_only':True}
+    copper.evidence=[EvidenceItem(id='fixture-copper-question',source='reddit',title='Copper Workshop SteamCMD download stuck after update',
+        published_at=now-timedelta(days=1),captured_at=now-timedelta(minutes=1),url='https://example.invalid/synthetic-question')]
+    prior=[]
+    for signal in snapshot.platform_signals:
+        signal.captured_at=now
+        signal.history={}
+        signal.scope_version='2.1'
+        if signal.source in {'steam','twitch'}:
+            signal.market='GLOBAL'
+        if signal.source=='twitch' and signal.metrics:
+            signal.metrics['top1_viewer_share']=signal.metrics.get('audience_concentration',.1)
+            signal.metrics['non_top1_viewers']=signal.metrics.get('total_viewers',0)*(1-signal.metrics['top1_viewer_share'])
+        signal.observation_id=None
+        stamp_observation(signal)
+        if signal.source not in {'steam','twitch'} or signal.game_slug=='the-glass-archive':continue
+        for hours in (2,4,24,26,28):
+            old=signal.model_copy(deep=True)
+            old.captured_at=now-timedelta(hours=hours)
+            old.observation_id=None
+            if signal.game_slug=='signal-tactics' and hours>=24:
+                for metric in ('current_players','total_viewers','live_channels','non_top1_viewers'):
+                    if metric in old.metrics:old.metrics[metric]=old.metrics[metric]/3
+            stamp_observation(old)
+            prior.append(old)
+    decisions=[]
+    for e in snapshot.entities:
+        signals=[s for s in snapshot.platform_signals if s.game_slug==e.slug]
+        m=assess_momentum(e.slug,signals,prior,settings,now)
+        # Only Copper's prior issue is an admission trigger in this synthetic fixture.
+        evidence=copper.evidence if e.slug=='copper-workshop' else []
+        d=decide_candidate(e,signals,m,settings,now,evidence=evidence)
+        d.selected_for_monitoring=True
+        decisions.append(d)
+    summary=allocate_deep(decisions,snapshot.entities,settings,now,10)
+    snapshot.selection_decisions=decisions
+    snapshot.selection_summary={**summary,'raw_discovery_rows':9,'unique_entities':5,'metadata_entities':5,'monitored_entities':5}
+    snapshot.before_deep_selection={'as_of':now.isoformat(),'summary':dict(snapshot.selection_summary),
+        'decisions':[d.model_dump(mode='json') for d in decisions]}
+    snapshot.raw_metadata.update({'dataset':'fixture','deep_game_slugs':[d.game_slug for d in decisions if d.selected_for_deep],
+        'demo_history_observations':[s.model_dump(mode='json') for s in prior], 'policy':settings.public_policy()})
+    analyze(snapshot,settings)
+    snapshot.selection_summary.update(validation_candidates=sum(g.action!='WATCH' and g.selection.selected_for_deep for g in snapshot.game_opportunities),
+        question_pages=sum(p.evidence_level=='observed_question' for p in snapshot.page_opportunities),
+        content_proxy_pages=sum(p.evidence_level=='observed_content_proxy' for p in snapshot.page_opportunities),
+        hypothesis_pages=sum(p.evidence_level=='hypothesis' for p in snapshot.page_opportunities))
+    snapshot.after_deep_assessment={'as_of':now.isoformat(),'games':[g.model_dump(mode='json') for g in snapshot.game_opportunities]}
+    snapshot.source_statuses=[SourceStatus(source=source,state=SourceState.PARTIAL if source!='trends' else SourceState.SKIPPED,
+        message='ALL observations synthetic; not live verification',records=sum(s.source==source and bool(s.metrics) for s in snapshot.platform_signals)) for source in ('steam','twitch','youtube','reddit','trends')]
     return snapshot
