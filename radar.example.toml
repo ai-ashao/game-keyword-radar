@@ -1,0 +1,40 @@
+# Copy to radar.toml. TOML uses Python 3.11's standard library, no YAML dependency.
+[sources]
+steam = true
+twitch = true
+youtube = true
+reddit = true
+trends = false
+[scan]
+discovery_limit = 80
+deep_analysis_limit = 10
+cache_ttl_seconds = 3600
+twitch_cache_ttl_seconds = 900
+twitch_max_stream_pages = 3
+twitch_sample_pages = 3
+[markets]
+steam_country = "US"
+youtube_region = "US"
+youtube_language = "en"
+trends_geo = "US"
+[budgets]
+youtube_search_budget = 20
+youtube_daily_search_budget = 80
+youtube_video_budget = 30
+youtube_queries_per_game = 2
+reddit_max_requests = 30
+[history]
+history_24h_tolerance_hours = 6
+history_7d_tolerance_hours = 24
+[existing_sites]
+WorkshopFetch = ["steam workshop", "workshop download", "steamcmd"]
+"FN Sprite Hub" = ["fortnite sprite"]
+GameKitHQ = ["calculator", "tracker", "generator", "planner"]
+# Explicit aliases/subreddits/platform mappings: uncomment and replace with verified IDs.
+# [[entity_overrides]]
+# canonical_name = "Example Game"
+# slug = "example-game"
+# aliases = ["ExampleGame"]
+# subreddits = ["ExampleGame"]
+# mechanics = ["crafting"]
+# platform_ids = { steam = "123456", twitch = "987654" }

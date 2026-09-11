@@ -26,7 +26,7 @@ def test_dashboard_renders_empty_shell(tmp_path):
     assert "Game Keyword Radar" in response.text
     assert "今天，什么值得" in response.text
     assert "/static/favicon.svg" in response.text
-    assert "/static/styles.css?v=0.2.0" in response.text
+    assert "/static/styles.css?v=2.0.0rc1" in response.text
     assert 'id="download-report" aria-disabled="true"' in response.text
     assert 'href="/api/report"' not in response.text
 

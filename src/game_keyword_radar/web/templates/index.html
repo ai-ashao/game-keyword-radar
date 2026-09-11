@@ -1,276 +1,38 @@
 <!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#0b2830" />
-    <title>Game Keyword Radar</title>
-    <link rel="icon" href="{{ url_for('static', path='/favicon.svg') }}" type="image/svg+xml" />
-    <link rel="stylesheet" href="{{ url_for('static', path='/styles.css') }}?v={{ version }}" />
-    <script defer src="{{ url_for('static', path='/app.js') }}?v={{ version }}"></script>
-  </head>
-  <body>
-    <a class="skip-link" href="#main">跳到主要内容</a>
-    <div class="app-shell">
-      <aside class="sidebar" aria-label="主导航">
-        <div class="brand-lockup">
-          <div class="brand-mark" aria-hidden="true"><span></span></div>
-          <div>
-            <p class="brand-kicker">LOCAL RESEARCH</p>
-            <p class="brand-name">GAME<br />KEYWORD<br />RADAR</p>
-          </div>
-        </div>
-        <nav class="side-nav">
-          <a class="nav-item active" href="#overview"><span>01</span>机会总览</a>
-          <a class="nav-item" href="#history"><span>02</span>扫描变化</a>
-          <a class="nav-item" href="#opportunities"><span>03</span>机会排行</a>
-          <a class="nav-item" href="#sources"><span>04</span>数据状态</a>
-        </nav>
-        <div class="sidebar-note">
-          <p>V1 · {{ country }} / EN</p>
-          <p>分数是研究优先级<br />不是流量预测</p>
-        </div>
-      </aside>
-
-      <main id="main" class="main-content">
-        <header class="topbar">
-          <div class="run-state" id="run-state" data-state="idle">
-            <span class="state-dot" aria-hidden="true"></span>
-            <span id="run-state-text">等待扫描</span>
-          </div>
-          <div class="topbar-actions">
-            <a class="text-action" id="download-report" aria-disabled="true">下载报告</a>
-            <button class="button button-secondary" id="demo-button" type="button">载入示例</button>
-            <button class="button button-primary" id="scan-button" type="button">扫描 Steam</button>
-          </div>
-        </header>
-
-        <section id="overview" class="hero-section" aria-labelledby="hero-title">
-          <div class="hero-copy">
-            <p class="eyebrow">TODAY'S VALIDATION QUEUE</p>
-            <h1 id="hero-title"><span>今天，什么值得</span><em>继续验证？</em></h1>
-            <p class="hero-description">
-              从 Steam 信号筛出工具、攻略和数据库主题。先看问题强度，再补 SERP 和搜索需求证据。
-            </p>
-            <div class="hero-meta">
-              <span id="snapshot-time">尚无快照</span>
-              <span class="meta-divider" aria-hidden="true"></span>
-              <span id="snapshot-market">US · ENGLISH</span>
-            </div>
-          </div>
-
-          <div class="radar-stage" aria-label="机会雷达可视化">
-            <div class="radar-grid" id="radar-grid">
-              <div class="radar-axis radar-axis-x"></div>
-              <div class="radar-axis radar-axis-y"></div>
-              <div class="radar-ring ring-one"></div>
-              <div class="radar-ring ring-two"></div>
-              <div class="radar-ring ring-three"></div>
-              <div class="radar-sweep"></div>
-              <div class="radar-center"></div>
-              <div id="radar-dots"></div>
-            </div>
-            <div class="radar-caption">
-              <span>RANGE / 69 MAX</span>
-              <strong id="radar-primary">NO SIGNAL</strong>
-            </div>
-          </div>
-        </section>
-
-        <section class="metric-rail" aria-label="扫描统计">
-          <article class="metric-cell">
-            <span>候选游戏</span>
-            <strong id="metric-games">—</strong>
-            <small>Steam 深度分析</small>
-          </article>
-          <article class="metric-cell">
-            <span>机会主题</span>
-            <strong id="metric-opportunities">—</strong>
-            <small>去重后的页面方向</small>
-          </article>
-          <article class="metric-cell">
-            <span>优先验证</span>
-            <strong id="metric-priority">—</strong>
-            <small>评分 60–69</small>
-          </article>
-          <article class="metric-cell metric-cell-warning">
-            <span>待补证据</span>
-            <strong id="metric-evidence">—</strong>
-            <small>SERP / Trends / 玩法</small>
-          </article>
-        </section>
-
-        <div class="fixture-banner" id="fixture-banner" hidden>
-          当前显示的是示例数据，只用于体验界面，不代表实时平台事实。
-        </div>
-
-        <section id="history" class="history-section" aria-labelledby="history-title">
-          <div class="section-heading history-heading">
-            <div>
-              <p class="eyebrow">SNAPSHOT CHANGELOG</p>
-              <h2 id="history-title">扫描变化</h2>
-            </div>
-            <div class="history-controls">
-              <label>
-                <span>观察快照</span>
-                <select id="history-current" aria-label="观察快照"></select>
-              </label>
-              <label>
-                <span>对比基线</span>
-                <select id="history-baseline" aria-label="对比基线"></select>
-              </label>
-            </div>
-          </div>
-
-          <div class="history-empty" id="history-empty">
-            <span class="history-empty-mark" aria-hidden="true">↗</span>
-            <div>
-              <h3>需要至少两次扫描</h3>
-              <p>再次扫描 Steam 后，这里会显示候选、玩家数、排名和机会优先级的变化。</p>
-            </div>
-          </div>
-
-          <div id="history-content" hidden>
-            <div class="change-metrics" aria-label="快照变化统计">
-              <article><span>新出现游戏</span><strong id="change-new-games">0</strong><small>当前快照新增</small></article>
-              <article><span>离场游戏</span><strong id="change-removed-games">0</strong><small>当前快照未出现</small></article>
-              <article><span>优先级上升</span><strong id="change-rising">0</strong><small>规则分相对提高</small></article>
-              <article><span>新机会</span><strong id="change-new-opportunities">0</strong><small>新生成的页面方向</small></article>
-            </div>
-            <div class="change-note" id="change-note"></div>
-            <div class="change-board">
-              <section class="change-panel" aria-labelledby="game-change-title">
-                <header>
-                  <p>GAME SIGNALS</p>
-                  <h3 id="game-change-title">游戏变化</h3>
-                </header>
-                <div class="change-list" id="game-change-list"></div>
-              </section>
-              <section class="change-panel" aria-labelledby="opportunity-change-title">
-                <header>
-                  <p>RESEARCH PRIORITY</p>
-                  <h3 id="opportunity-change-title">机会变化</h3>
-                </header>
-                <div class="change-list" id="opportunity-change-list"></div>
-              </section>
-            </div>
-          </div>
-        </section>
-
-        <section id="opportunities" class="workspace-section" aria-labelledby="opportunity-title">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">VALIDATION BOARD</p>
-              <h2 id="opportunity-title">机会排行</h2>
-            </div>
-            <div class="filters" role="search">
-              <label class="search-field">
-                <span class="sr-only">搜索游戏或关键词</span>
-                <input id="search-input" type="search" placeholder="搜索游戏或关键词" />
-              </label>
-              <label>
-                <span class="sr-only">页面类型</span>
-                <select id="type-filter">
-                  <option value="all">全部类型</option>
-                  <option value="tool">工具</option>
-                  <option value="database">数据库</option>
-                  <option value="guide">攻略</option>
-                  <option value="tracker">追踪器</option>
-                </select>
-              </label>
-            </div>
-          </div>
-
-          <div class="board-grid">
-            <div class="table-panel">
-              <div class="opportunity-table" role="table" aria-label="游戏关键词机会排行">
-                <div class="table-row table-header" role="row">
-                  <span role="columnheader">机会</span>
-                  <span role="columnheader">形态</span>
-                  <span role="columnheader">证据</span>
-                  <span role="columnheader">优先级</span>
-                </div>
-                <div id="opportunity-rows"></div>
-              </div>
-              <div class="empty-state" id="empty-state">
-                <div class="empty-radar" aria-hidden="true"></div>
-                <h3>还没有扫描快照</h3>
-                <p>先载入示例了解界面，或直接扫描 Steam 获取当前候选。</p>
-                <div>
-                  <button class="button button-secondary" id="empty-demo" type="button">载入示例</button>
-                  <button class="button button-primary" id="empty-scan" type="button">扫描 Steam</button>
-                </div>
-              </div>
-            </div>
-
-            <aside class="distribution-panel" aria-labelledby="distribution-title">
-              <div class="panel-label">
-                <span>Score distribution</span>
-                <span>0–69</span>
-              </div>
-              <h3 id="distribution-title">优先级分布</h3>
-              <div id="score-bars" class="score-bars"></div>
-              <p class="panel-footnote">没有实时 SERP 证据，所有机会最高 69 分。</p>
-            </aside>
-          </div>
-        </section>
-
-        <section id="sources" class="source-section" aria-labelledby="source-title">
-          <div class="section-heading compact">
-            <div>
-              <p class="eyebrow">SOURCE HEALTH</p>
-              <h2 id="source-title">数据状态</h2>
-            </div>
-            <p>失败会降低证据完整度，但不会让整个扫描中断。</p>
-          </div>
-          <div class="source-grid" id="source-grid"></div>
-        </section>
-
-        <footer class="page-footer">
-          <span>Game Keyword Radar v{{ version }}</span>
-          <span>Local only · 127.0.0.1</span>
-        </footer>
-      </main>
-    </div>
-
-    <dialog class="detail-dialog" id="detail-dialog" aria-labelledby="detail-title">
-      <div class="dialog-shell">
-        <header class="dialog-header">
-          <div>
-            <p class="eyebrow" id="detail-game">GAME</p>
-            <h2 id="detail-title">Opportunity</h2>
-          </div>
-          <button class="icon-button" id="detail-close" type="button" aria-label="关闭详情">×</button>
-        </header>
-        <div id="detail-content" class="dialog-content"></div>
-      </div>
-    </dialog>
-
-    <dialog class="scan-dialog" id="scan-dialog" aria-labelledby="scan-title">
-      <form class="scan-form" id="scan-form">
-        <div class="dialog-header">
-          <div>
-            <p class="eyebrow">NEW SCAN</p>
-            <h2 id="scan-title">扫描 Steam</h2>
-          </div>
-          <button class="icon-button" id="scan-close" type="button" aria-label="关闭扫描设置">×</button>
-        </div>
-        <label class="form-field">
-          <span>深度分析游戏数</span>
-          <input id="scan-limit" name="limit" type="number" min="1" max="30" value="10" />
-          <small>默认 10，最多 30。数量越大，请求时间越长。</small>
-        </label>
-        <label class="check-field">
-          <input id="scan-trends" name="with_trends" type="checkbox" />
-          <span>
-            <strong>启用可选 Google Trends</strong>
-            <small>最多检查前 5 个游戏；非官方路径，可能失败。</small>
-          </span>
-        </label>
-        <button class="button button-primary button-wide" type="submit">开始扫描</button>
-      </form>
-    </dialog>
-
-    <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  </body>
-</html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Game Keyword Radar · Demand Research</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/static/styles.css?v={{version}}"><script defer src="/static/app.js?v={{version}}"></script></head>
+<body>
+<a href="#main" class="skip-link">跳到主要内容</a>
+<aside class="sidebar"><a class="brand" href="#overview"><span class="radar-mark">◉</span><span>GAME KEYWORD<br><strong>RADAR <small>V2</small></strong></span></a>
+<div class="nav-label">研究工作台</div><nav aria-label="主导航">
+<button data-view="overview" class="nav active">◎ <span>今日机会</span></button>
+<button data-view="pages" class="nav">▦ <span>页面机会图谱</span></button>
+<button data-view="queue" class="nav">☑ <span>验证队列</span><span class="count" id="queue-count">0</span></button>
+<button data-view="history" class="nav">◷ <span>历史变化</span></button>
+<button data-view="sources" class="nav">◈ <span>数据源与预算</span></button>
+</nav><div class="sidebar-bottom"><span class="local-dot"></span> LOCAL-FIRST<br><small>文件保存在本机，不自动建站。<br>{{version}} · {{country}}</small></div></aside>
+<div class="workspace"><header class="topbar"><span class="breadcrumb">研究 / <strong id="view-name">今日机会</strong></span><div class="top-actions"><span id="data-mode" class="pill">尚无快照</span><button id="demo" class="button subtle">体验示例</button><a id="download-report" aria-disabled="true" class="button subtle">导出报告</a></div></header>
+<main id="main"><div id="toast" role="status" aria-live="polite" hidden></div>
+<section id="scan-progress" class="notice" aria-live="polite" hidden></section>
+<section id="demo-notice" class="notice amber" hidden><strong>示例模式</strong> · 这里的游戏、数值与问题都是合成数据，只用于验证界面和流程，不代表实时机会。</section>
+<section id="legacy-notice" class="notice" hidden>正在只读查看 V1 快照。历史文件未改写；跨平台分析需要运行一次 V2 扫描。</section>
+<section id="overview-view" class="view">
+<div class="hero"><div><div class="eyebrow">GAME DEMAND RADAR</div><h1>今天，什么值得<br><em>进一步研究？</em></h1><p>先发现需求，再验证页面。把注意力留给值得打开 Semrush 的游戏。</p></div>
+<form id="scan-form" class="scan-box"><strong>扫描今日机会</strong><div class="scan-fields"><label>发现上限<input id="discovery-limit" type="number" min="1" max="100" value="{{discovery_limit}}" required></label><label>深度分析<input id="deep-limit" type="number" min="0" max="30" value="{{deep_limit}}" required></label></div><label class="check"><input id="trends-enabled" type="checkbox" {% if trends_enabled %}checked{% endif %}> 可选 Google Trends</label><button id="scan-button" class="button primary" type="submit">↻ 扫描跨平台需求</button><small>凭据缺失时跳过该来源，保留其他结果。</small></form></div>
+<div id="summary" class="summary-grid"></div>
+<div class="section-heading"><div><h2>优先研究的游戏</h2><p id="snapshot-time">还没有扫描记录</p></div><label class="search-label"><span class="sr-only">搜索游戏</span><input id="search" type="search" placeholder="搜索游戏或页面关键词"></label></div>
+<div class="filters" role="group" aria-label="机会筛选"><button class="chip active" data-filter="all">全部</button><button class="chip" data-filter="rising">跨平台上升</button><button class="chip" data-filter="observed">有问题证据</button><button class="chip" data-filter="existing">适合已有站</button><button class="chip" data-filter="watch">继续观察</button></div>
+<div id="games" class="game-grid"></div><div id="empty" class="empty"><span>◎</span><h2>从一次扫描开始</h2><p>Steam 可直接使用；Twitch 与 YouTube 在本机 .env 配置凭据。<br>也可先点“体验示例”，走完研究与验证流程。</p></div>
+<p class="footnote">Demand 分数是研究排序，不是成功率。覆盖率低表示证据不完整，不等于游戏没有需求。</p>
+</section>
+<section id="pages-view" class="view" hidden><div class="section-heading"><div><div class="eyebrow">EVIDENCE-TRIGGERED PAGE GRAPH</div><h1>页面机会图谱</h1><p>每个节点都说明：这个页面为什么存在。</p></div><a id="export-csv" class="button subtle" aria-disabled="true">导出关键词 CSV</a></div><div id="all-pages"></div></section>
+<section id="queue-view" class="view" hidden><div class="section-heading"><div><div class="eyebrow">MANUAL VALIDATION</div><h1>验证队列</h1><p>Semrush → 检查真实 SERP → 人工 Build / Skip。没有自动“验证通过”。</p></div><select id="queue-filter" aria-label="验证阶段"><option value="all">所有阶段</option><option value="pending_semrush">待 Semrush</option><option value="pending_serp">待 SERP</option><option value="validated">人工验证完成</option><option value="skip">已忽略</option></select></div><div id="queue-list"></div></section>
+<section id="history-view" class="view" hidden><div class="eyebrow">OBSERVATION HISTORY</div><h1>历史变化</h1><p>比较本地观测。没有 24 小时附近的样本，就不显示“24h 增长”。</p><div class="compare-controls"><label>当前快照<select id="current-snapshot"></select></label><label>对照快照<select id="baseline-snapshot"></select></label><button id="compare" class="button primary">比较变化</button></div><div id="comparison"></div><h2>全部扫描记录</h2><div id="history-list"></div></section>
+<section id="sources-view" class="view" hidden><div class="eyebrow">SOURCE HEALTH</div><h1>数据源与预算</h1><p>配置就绪不等于接口已通过实测。密钥只保存在本机，不会发到浏览器。</p><div id="source-list"></div><div id="budget-list"></div><div class="panel"><h2>本机配置</h2><p>编辑项目目录的 <code>.env</code> 设置 Twitch / YouTube 凭据，编辑 <code>radar.toml</code> 调整预算、市场和实体别名。修改后重启本地服务。</p><p>Trends 官方 Alpha 仅预留授权适配器接口；没有权限时使用可选的 legacy provider。Reddit RSS 若被拒绝访问，会降级而不是绕过限制。</p></div></section>
+<section id="detail-view" class="view" hidden><button id="back-overview" class="button subtle">← 返回游戏机会</button><div id="game-detail"></div></section>
+</main><footer>Game Keyword Radar · Search intent is validated, not assumed.</footer></div>
+<dialog id="validation-dialog"><form id="validation-form"><div class="dialog-heading"><div><div class="eyebrow">EVIDENCE BEFORE BUILD</div><h2>填写人工验证记录</h2></div><button type="button" id="close-dialog" class="icon-button" aria-label="关闭">×</button></div><p id="validation-keyword"></p><div id="validation-error" class="notice danger" role="alert" hidden></div>
+<div class="form-grid"><label>阶段<select name="stage"><option value="pending_semrush">待 Semrush</option><option value="pending_serp">待 SERP</option><option value="validated">人工验证完成</option><option value="skip">忽略</option></select></label><label>人工决策<select name="decision"><option value="undecided">尚未决定</option><option value="build">Build</option><option value="skip">Skip</option></select></label>
+<label>Semrush 月搜索量<input name="semrush_volume" type="number" min="0" placeholder="未查留空，真实 0 可填 0"></label><label>Semrush KD<input name="semrush_kd" type="number" min="0" max="100" step="0.1"></label><label>Semrush 检查时间<input name="semrush_checked_at" type="datetime-local"></label><label>SERP 检查时间<input name="serp_checked_at" type="datetime-local"></label></div>
+<label>Semrush 证据（市场、查询词、导出文件或结果记录）<textarea name="semrush_evidence" rows="2" maxlength="4000"></textarea></label><label>已检查的自然结果 URL（每行一条，验证完成至少 3 条）<textarea name="serp_urls" rows="3"></textarea></label><label>SERP 意图、竞争与页面缺口<textarea name="serp_notes" rows="3" maxlength="8000"></textarea></label><label>Build / Skip 原因<textarea name="decision_reason" rows="2" maxlength="4000"></textarea></label><p class="footnote">“人工验证完成”表示你填写了检查记录，不是系统确认这些网页或数据的真实性。</p><div class="dialog-footer"><button type="button" id="cancel-dialog" class="button subtle">取消</button><button id="save-validation" type="submit" class="button primary">保存验证记录</button></div></form></dialog>
+</body></html>

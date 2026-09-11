@@ -1,17 +1,18 @@
-# Game Keyword Radar 当前功能状态
+# Feature Status · V2 RC1
 
-最后语义核对：2026-08-23。本文是滚动功能入口；V1 决策与来源风险见 `IMPLEMENTATION_PLAN.md` 和 `AUDIT.md`。
+| Area | Implementation | Acceptance boundary |
+|---|---|---|
+| Steam / Twitch discovery | Implemented; bounded and independently degradable | Mocked integration passed; real joint scan not passed here |
+| YouTube | Search → videos, intent sample, cache and persistent call budget | Offline transport tests passed; actual API key needed |
+| Reddit | Public RSS + title clustering | Offline RSS tests passed; live access may be refused |
+| Trends legacy | Optional provider, cache, missing-data semantics | Adapter behavior implemented; optional package / live service not exercised here |
+| Trends official | Authorized adapter injection seam | No Alpha credentials or concrete authorized adapter supplied |
+| Entity resolution | ID / exact / normalized / alias; fuzzy suggestions only | Offline tests passed |
+| Page Graph / routing | Evidence-based nodes, explicit hypotheses, existing sites | Offline tests passed |
+| Validation Queue | Browser form, server gates, separate persistence | Offline Chromium + ASGI workflow passed |
+| V1 snapshot compatibility | Read-only restore, original core contracts preserved | Compatibility tests passed |
+| History | Compatible observation windows, sample scope, rank / score / page diffs | Offline tests passed |
+| Local Dashboard | Overview, detail, pages, queue, history, sources | Desktop / 390px / 768px offline browser checks passed |
+| Reports / Skill | V2 Markdown, CSV export, updated Codex Skill | Artifact / contract tests passed |
 
-| 功能 | 代码 | 验证/边界 | 发布状态 |
-|---|---|---|---|
-| Steam 候选扫描 | 已实现 | 非稳定页面接口，失败会记录来源状态 | V1 |
-| 可追溯关键词与机会评分 | 已实现 | 是研究优先级，不是流量预测 | V1 |
-| 本地 Dashboard | 已实现 | 默认绑定本机地址 | V1 |
-| CLI demo、scan、serve、report | 已实现 | 离线测试覆盖主要模型与输出 | V1 |
-| 原始数据、快照、latest 和 Markdown 报告 | 已实现 | 文件系统持久化 | V1 |
-| 历史快照回看与双快照变化对比 | 已实现 | 本地扫描差异，不代表搜索需求 | V1.1 |
-| 可选 Google Trends | 已实现 | 默认关闭；非官方来源可降级 | 可选 |
-| SERP 证据 | 暂缓录入 | 不自动抓取；不阻塞扫描和历史对比 | 后续人工输入 |
-| 账号、云部署、数据库、自动建站 | 未实现 | 明确排除 | 不在 V1 |
-
-功能或来源适配变化时同步更新；活跃开发每月、稳定阶段每季度复核，Steam/Trends 上游变化后立即复核。
+No automatic article generation, social posting, SaaS, user accounts, database service, massive SERP crawler or auto Build is included.

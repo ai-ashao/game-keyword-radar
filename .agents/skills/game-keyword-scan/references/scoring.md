@@ -1,14 +1,9 @@
-# Scoring reference
+# Scoring boundaries
 
-Game signal is a deterministic 0-100 prioritization score derived from Steam rank, current players, review scale, release recency, and mechanics-understanding confidence.
+Game Demand and Page Opportunity are different scores. Source weights 25/20/15/15/15 plus optional direction confirmation 10; normalize observed sources and show coverage separately. Missing is null, never zero. Counts from different platforms are not added.
 
-Keyword opportunity score combines problem intensity, page intent, feasibility, low maintenance, game signal, and evidence confidence.
+A source without a valid historical baseline has no 24h/7d direction. Twitch incomplete samples are lower bounds; concentrated audiences have lower confidence. YouTube velocity is views divided by video age, not measured hourly growth. Reddit is a sampled set of titles with community bias.
 
-Hard limits:
+Page raw score is 0–100; pre-validation displayed score remains at most 69. Gameplay-only nodes are hypotheses. No score means a probability, monthly Google volume or revenue.
 
-- No live SERP evidence: maximum 69 and `needs_validation`.
-- Low mechanics confidence: maximum 59.
-- Missing fields contribute no points and reduce completeness; they are not imputed.
-- Optional Trends data describes within-query direction only.
-
-The current formula and weights live in `docs/IMPLEMENTATION_PLAN.md`. Python implementations live in `src/game_keyword_radar/analyzers/scoring.py`.
+See repository `docs/V2_SCORING.md` for implemented formulas and `docs/V2_ACCEPTANCE.md` for tested versus unverified behavior.

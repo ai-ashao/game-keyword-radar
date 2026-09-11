@@ -1,16 +1,7 @@
-# SERP evidence
+# Manual keyword / SERP evidence
 
-For each checked keyword, record:
+Record the actual keyword, market, check date and source. Semrush volume may genuinely be zero; missing must remain null. Never treat video views or live audience as monthly searches.
 
-- exact query;
-- country and language;
-- UTC check time;
-- top representative URLs and titles;
-- domain type: `official`, `large_publisher`, `wiki`, `community`, `video`, `independent_site`, `interactive_tool`, `marketplace`, or `unrelated`;
-- whether the result directly satisfies the query;
-- whether a working interactive tool already exists;
-- whether version freshness affects usefulness.
+Inspect natural results for intent, page type, dominant domains, useful coverage gaps and maintenance demands. Preserve at least three distinct inspected result URLs plus concrete notes before marking the local record complete. URL count alone is not substantive validation.
 
-Decide page clustering by shared intent and overlapping result types, not lexical similarity alone.
-
-Never infer exact traffic from rank position or third-party marketing copy. If the live search tool is unavailable, report `SERP evidence unavailable` and keep the opportunity at `needs_validation`.
+Build / Skip requires a human decision and rationale. Existing-site fit does not bypass this step. Keep the user-provided evidence distinct from model inference. Manual records live separately from immutable scan snapshots.

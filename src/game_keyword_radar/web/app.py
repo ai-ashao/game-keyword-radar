@@ -1,204 +1,194 @@
 from __future__ import annotations
-
 import asyncio
+import csv
+import io
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
-
-from fastapi import FastAPI, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from urllib.parse import urlparse
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request, HTTPException, status
+from fastapi.responses import HTMLResponse, PlainTextResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field
-
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from pydantic import BaseModel, Field, ValidationError
 from game_keyword_radar import __version__
 from game_keyword_radar.config import Settings
-from game_keyword_radar.demo import build_demo_snapshot
+from game_keyword_radar.demo import save_demo
 from game_keyword_radar.history import compare_snapshots
-from game_keyword_radar.models import ScanSnapshot
-from game_keyword_radar.pipeline import Scanner
+from game_keyword_radar.history_v2 import compare_v2
+from game_keyword_radar.models import ScanSnapshot, ValidationRecord, utc_now
+from game_keyword_radar.pipeline import Scanner, configured_sources
 from game_keyword_radar.reporters.markdown import MarkdownReporter
 from game_keyword_radar.storage import SnapshotStore
+from game_keyword_radar.validation import ValidationStore
+from game_keyword_radar.sources.base import safe_error
 
+WEB_ROOT=Path(__file__).resolve().parent
 
-WEB_ROOT = Path(__file__).resolve().parent
-
-
-def snapshot_payload(snapshot: ScanSnapshot) -> dict[str, Any]:
-    payload = snapshot.model_dump(mode="json")
-    payload["state"] = snapshot.state.value
-    return payload
-
+def snapshot_payload(snapshot):
+    data=snapshot.model_dump(mode='json');data['state']=snapshot.state.value
+    return data
 
 class ScanRequest(BaseModel):
-    limit: int = Field(default=10, ge=1, le=30)
-    with_trends: bool = False
-
+    # V1 limit remains <=30. Broad V2 discovery is a separate setting.
+    limit:int|None=Field(default=None,ge=1,le=30)
+    discovery_limit:int|None=Field(default=None,ge=1,le=100)
+    deep:int|None=Field(default=None,ge=0,le=30)
+    with_trends:bool|None=None
 
 @dataclass
 class ScanManager:
-    settings: Settings
-    running: bool = False
-    phase: str = "idle"
-    message: str = "Ready"
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
-    last_run_id: str | None = None
-    error: str | None = None
-    _task: asyncio.Task[None] | None = field(default=None, repr=False)
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "running": self.running,
-            "phase": self.phase,
-            "message": self.message,
-            "started_at": self.started_at.isoformat() if self.started_at else None,
-            "finished_at": self.finished_at.isoformat() if self.finished_at else None,
-            "last_run_id": self.last_run_id,
-            "error": self.error,
-        }
-
-    def start(self, request: ScanRequest) -> bool:
-        if self.running:
-            return False
-        self.running = True
-        self.phase = "collecting"
-        self.message = "正在读取 Steam 候选和详情"
-        self.started_at = datetime.now(timezone.utc)
-        self.finished_at = None
-        self.error = None
-        self._task = asyncio.create_task(self._run(request))
-        return True
-
-    async def _run(self, request: ScanRequest) -> None:
+    settings:Settings
+    running:bool=False
+    phase:str='idle'
+    message:str='Ready'
+    started_at:datetime|None=None
+    finished_at:datetime|None=None
+    last_run_id:str|None=None
+    error:str|None=None
+    _task:asyncio.Task|None=field(default=None,repr=False)
+    def as_dict(self):
+        return {k:(v.isoformat() if isinstance(v,datetime) else v) for k,v in vars(self).items() if k not in {'settings','_task'}}
+    def progress(self,phase,message):self.phase=phase;self.message=message
+    def start(self,request):
+        if self.running:return False
+        self.running=True;self.phase='discovery';self.message='正在扫描跨平台游戏需求'
+        self.started_at=utc_now();self.finished_at=None;self.error=None
+        self._task=asyncio.create_task(self._run(request));return True
+    async def _run(self,request):
         try:
-            snapshot = await Scanner(self.settings).run(
-                limit=request.limit, with_trends=request.with_trends
-            )
-            self.last_run_id = snapshot.run_id
-            self.phase = "complete"
-            self.message = (
-                f"完成：{len(snapshot.games)} 个游戏，"
-                f"{len(snapshot.opportunities)} 个待验证机会"
-            )
+            snapshot=await Scanner(self.settings,progress=self.progress).run(**request.model_dump())
+            self.last_run_id=snapshot.run_id
+            self.phase='complete' if snapshot.entities or snapshot.games else 'failed'
+            self.message=f'完成：{len(snapshot.entities)} 个游戏，{len(snapshot.page_opportunities)} 个页面假设' if snapshot.entities else '没有可用候选；上一次有效快照已保留，请查看数据源状态'
         except Exception as exc:
-            self.phase = "failed"
-            self.message = "扫描失败，现有快照没有被覆盖"
-            self.error = str(exc)
+            self.phase='failed';self.message='扫描失败；已保存的快照保持不变';self.error=safe_error(exc)
         finally:
-            self.running = False
-            self.finished_at = datetime.now(timezone.utc)
+            self.running=False;self.finished_at=utc_now()
 
-
-def create_app(settings: Settings | None = None) -> FastAPI:
-    resolved = settings or Settings()
-    store = SnapshotStore(resolved)
-    reporter = MarkdownReporter(resolved)
-    manager = ScanManager(resolved)
-    templates = Jinja2Templates(directory=str(WEB_ROOT / "templates"))
-
-    web = FastAPI(
-        title="Game Keyword Radar",
-        version=__version__,
-        docs_url="/api/docs",
-        redoc_url=None,
-    )
-    web.state.settings = resolved
-    web.state.store = store
-    web.state.reporter = reporter
-    web.state.scan_manager = manager
-    web.mount("/static", StaticFiles(directory=str(WEB_ROOT / "static")), name="static")
-
-    @web.get("/", response_class=HTMLResponse)
-    async def index(request: Request) -> HTMLResponse:
-        return templates.TemplateResponse(
-            request=request,
-            name="index.html",
-            context={"version": __version__, "country": resolved.country},
-        )
-
-    @web.get("/api/snapshot")
-    async def latest_snapshot() -> dict[str, Any]:
-        snapshot = store.load_latest()
-        if snapshot is None:
-            raise HTTPException(status_code=404, detail="No snapshot exists yet.")
-        return snapshot_payload(snapshot)
-
-    @web.get("/api/snapshots")
-    async def snapshot_history() -> list[dict[str, Any]]:
-        return [summary.model_dump(mode="json") for summary in store.list_snapshots()]
-
-    @web.get("/api/snapshots/{run_id}")
-    async def historical_snapshot(run_id: str) -> dict[str, Any]:
-        snapshot = store.load_snapshot(run_id)
-        if snapshot is None:
-            raise HTTPException(status_code=404, detail="Snapshot was not found.")
-        return snapshot_payload(snapshot)
-
-    @web.get("/api/compare")
-    async def compare_snapshot_history(
-        current_run_id: str, baseline_run_id: str | None = None
-    ) -> dict[str, Any]:
-        current = store.load_snapshot(current_run_id)
-        if current is None:
-            raise HTTPException(status_code=404, detail="Current snapshot was not found.")
+def create_app(settings=None):
+    resolved=settings or Settings.load()
+    store=SnapshotStore(resolved);reporter=MarkdownReporter(resolved);manager=ScanManager(resolved);validations=ValidationStore(resolved)
+    templates=Jinja2Templates(directory=str(WEB_ROOT/'templates'))
+    @asynccontextmanager
+    async def lifespan(app):
+        yield
+        if manager._task and not manager._task.done():
+            manager._task.cancel()
+            try:await manager._task
+            except asyncio.CancelledError:pass
+    web=FastAPI(title='Game Keyword Radar',version=__version__,docs_url='/api/docs',redoc_url=None,lifespan=lifespan)
+    web.state.settings=resolved;web.state.store=store;web.state.reporter=reporter;web.state.scan_manager=manager
+    web.add_middleware(TrustedHostMiddleware,allowed_hosts=['localhost','127.0.0.1','[::1]','testserver'])
+    @web.middleware('http')
+    async def local_security(request,call_next):
+        if request.method not in {'GET','HEAD','OPTIONS'}:
+            origin=request.headers.get('origin')
+            if origin and urlparse(origin).netloc != request.headers.get('host'):
+                return JSONResponse({'detail':'Cross-origin writes are not allowed on this local workbench'},status_code=403)
+            if request.headers.get('sec-fetch-site')=='cross-site':
+                return JSONResponse({'detail':'Cross-site writes are not allowed'},status_code=403)
+            if int(request.headers.get('content-length','0'))>65536:
+                return JSONResponse({'detail':'Request body too large'},status_code=413)
+        response=await call_next(request)
+        response.headers['X-Content-Type-Options']='nosniff'
+        response.headers['Referrer-Policy']='no-referrer'
+        response.headers['Content-Security-Policy']="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+        return response
+    web.mount('/static',StaticFiles(directory=str(WEB_ROOT/'static')),name='static')
+    @web.get('/',response_class=HTMLResponse)
+    async def index(request:Request):
+        return templates.TemplateResponse(request=request,name='index.html',context={'version':__version__,'country':resolved.country,
+            'discovery_limit':resolved.discovery_limit,'deep_limit':resolved.deep_analysis_limit,'trends_enabled':resolved.trends_enabled})
+    def get_snapshot(run_id=None):
+        snapshot=store.load_snapshot(run_id) if run_id else store.load_latest()
+        if snapshot is None:raise HTTPException(404,'Snapshot was not found')
+        return snapshot
+    def full_payload(snapshot):
+        data=snapshot_payload(snapshot)
+        data['page_opportunities']=validations.projected_pages(snapshot)
+        return data
+    @web.get('/api/snapshot')
+    async def latest():return full_payload(get_snapshot())
+    @web.get('/api/snapshots')
+    async def history():return [s.model_dump(mode='json') for s in store.list_snapshots()]
+    @web.get('/api/snapshots/{run_id}')
+    async def historic(run_id:str):return full_payload(get_snapshot(run_id))
+    @web.get('/api/status')
+    async def scan_status():return manager.as_dict()
+    @web.post('/api/scan',status_code=status.HTTP_202_ACCEPTED)
+    async def scan(request:ScanRequest):
+        if not manager.start(request):raise HTTPException(409,'A scan is already running')
+        return manager.as_dict()
+    @web.post('/api/demo')
+    async def demo():
+        if manager.running:raise HTTPException(409,'A scan is already running')
+        snapshot=save_demo(resolved);reporter.save(snapshot)
+        return full_payload(snapshot)
+    @web.get('/api/sources')
+    async def sources():
+        latest=store.load_latest()
+        last_attempt=None
+        try:
+            last_attempt=ScanSnapshot.model_validate_json((resolved.data_dir/'last-attempt.json').read_text())
+        except (OSError,ValueError):pass
+        return {'configuration':configured_sources(resolved),
+            'latest_statuses':[s.model_dump(mode='json') for s in (last_attempt or latest).source_statuses] if (last_attempt or latest) else [],
+            'is_demo':(last_attempt or latest).is_demo if (last_attempt or latest) else None,
+            'last_attempt_run_id':last_attempt.run_id if last_attempt else None,
+            'budgets':{'discovery_limit':resolved.discovery_limit,'deep_limit':resolved.deep_analysis_limit,
+                'youtube_search_calls_per_scan':resolved.youtube_search_budget,'youtube_search_calls_per_local_day':resolved.youtube_daily_search_budget,
+                'reddit_requests_per_scan':resolved.reddit_max_requests},
+            'configuration_file':str(resolved.project_root/'radar.toml')}
+    @web.get('/api/compare')
+    async def compare(current_run_id:str,baseline_run_id:str|None=None):
+        current=get_snapshot(current_run_id)
         if baseline_run_id is None:
-            history = store.list_snapshots()
-            current_index = next(
-                (index for index, item in enumerate(history) if item.run_id == current_run_id),
-                None,
-            )
-            if current_index is None or current_index + 1 >= len(history):
-                raise HTTPException(
-                    status_code=404, detail="No earlier snapshot exists for comparison."
-                )
-            baseline_run_id = history[current_index + 1].run_id
-        if baseline_run_id == current_run_id:
-            raise HTTPException(
-                status_code=422, detail="Current and baseline snapshots must differ."
-            )
-        baseline = store.load_snapshot(baseline_run_id)
-        if baseline is None:
-            raise HTTPException(status_code=404, detail="Baseline snapshot was not found.")
-        return compare_snapshots(current, baseline).model_dump(mode="json")
-
-    @web.get("/api/status")
-    async def scan_status() -> dict[str, Any]:
-        return manager.as_dict()
-
-    @web.post("/api/scan", status_code=status.HTTP_202_ACCEPTED)
-    async def start_scan(scan_request: ScanRequest) -> dict[str, Any]:
-        if not manager.start(scan_request):
-            raise HTTPException(status_code=409, detail="A scan is already running.")
-        return manager.as_dict()
-
-    @web.post("/api/demo")
-    async def load_demo() -> dict[str, Any]:
-        if manager.running:
-            raise HTTPException(status_code=409, detail="Wait for the active scan to finish.")
-        snapshot = build_demo_snapshot(resolved)
-        store.save_snapshot(snapshot)
-        reporter.save(snapshot)
-        return snapshot_payload(snapshot)
-
-    @web.get("/api/report", response_class=PlainTextResponse)
-    async def latest_report(run_id: str | None = None) -> PlainTextResponse:
-        snapshot = store.load_snapshot(run_id) if run_id else store.load_latest()
-        if snapshot is None:
-            raise HTTPException(status_code=404, detail="No snapshot exists yet.")
-        return PlainTextResponse(
-            reporter.render(snapshot),
-            headers={
-                "Content-Disposition": f'attachment; filename="{snapshot.run_id}-game-keywords.md"'
-            },
-        )
-
-    @web.get("/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok", "version": __version__}
-
+            candidates=[s for s in store.list_snapshots() if s.generated_at<current.generated_at and
+                (s.country,s.language,s.is_demo)==(current.country,current.language,current.is_demo)]
+            if not candidates:raise HTTPException(404,'No earlier comparable snapshot exists')
+            baseline_run_id=candidates[0].run_id
+        if baseline_run_id==current_run_id:raise HTTPException(422,'Current and baseline snapshots must differ')
+        baseline=get_snapshot(baseline_run_id)
+        result=compare_snapshots(current,baseline).model_dump(mode='json')
+        if current.entities and baseline.entities:
+            extra=compare_v2(current,baseline)
+            extra['v2_removed_game_slugs']=extra.pop('removed_games')
+            result.update(extra)
+        return result
+    @web.get('/api/validation')
+    async def queue():
+        try:return [r.model_dump(mode='json') for r in validations.list()]
+        except ValueError as exc:raise HTTPException(409,str(exc))
+    @web.put('/api/validation')
+    async def save_validation(record:ValidationRecord):
+        snapshot=get_snapshot(record.source_run_id or None)
+        page=next((p for p in snapshot.page_opportunities if p.id==record.page_id),None)
+        if page is None:raise HTTPException(404,'Page opportunity does not exist in the referenced scan')
+        identity=(record.game_slug,record.keyword,record.market,record.language,record.is_demo)
+        expected=(page.game_slug,page.primary_keyword_hypothesis,snapshot.country,snapshot.language,snapshot.is_demo)
+        if identity!=expected:raise HTTPException(422,'Validation identity/market/demo type must match the referenced page')
+        record.source_run_id=snapshot.run_id
+        return validations.save(record).model_dump(mode='json')
+    @web.get('/api/keywords.csv',response_class=PlainTextResponse)
+    async def export_keywords(run_id:str|None=None):
+        snapshot=get_snapshot(run_id);buffer=io.StringIO();writer=csv.writer(buffer)
+        writer.writerow(['Keyword','Game','Page type','Evidence level','Existing site','Validation status'])
+        def safe(v):
+            text=str(v or '')
+            return "'"+text if text.startswith(('=','+','-','@','\t','\r')) else text
+        for p in validations.projected_pages(snapshot):
+            writer.writerow([safe(p[k]) for k in ('primary_keyword_hypothesis','game_slug','page_type','evidence_level','existing_site_fit','validation_status')])
+        return PlainTextResponse(buffer.getvalue(),media_type='text/csv; charset=utf-8',headers={'Content-Disposition':f'attachment; filename="{snapshot.run_id}-validation-keywords.csv"'})
+    @web.get('/api/report',response_class=PlainTextResponse)
+    async def report(run_id:str|None=None):
+        snapshot=get_snapshot(run_id)
+        return PlainTextResponse(reporter.render(snapshot),headers={'Content-Disposition':f'attachment; filename="{snapshot.run_id}-game-keywords.md"'})
+    @web.get('/health')
+    async def health():return {'status':'ok','version':__version__}
     return web
 
-
-app = create_app()
+app=create_app()
