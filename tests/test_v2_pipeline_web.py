@@ -5,6 +5,7 @@ from datetime import timedelta
 from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
+from game_keyword_radar import __version__
 from game_keyword_radar.models import *
 from game_keyword_radar.config import Settings
 from game_keyword_radar.sources.steam import SteamCollection
@@ -45,10 +46,12 @@ def providers(failed=None):
     return {'steam':FakeSteam(failed=='steam'),'twitch':FakeTwitch(failed=='twitch'),
             **{s:FakeDeep(s,failed==s) for s in ('youtube','reddit','trends')}}
 
-async def test_pipeline_merges_entities_and_preserves_twitch_only(tmp_path):
+async def test_pipeline_keeps_cross_platform_name_unresolved_and_preserves_twitch_only(tmp_path):
     s=Settings(project_root=tmp_path,trends_enabled=True);result=await Scanner(s,providers()).run(discovery_limit=5,deep=2)
-    assert result.schema_version==2 and len(result.entities)==2 and len(result.platform_signals)==10
-    assert next(e for e in result.entities if e.canonical_name=='Example Game').platform_ids=={'steam':'123','twitch':'42'}
+    assert result.schema_version==2 and len(result.entities)==3 and len(result.platform_signals)==15
+    example_entities=[e for e in result.entities if e.canonical_name=='Example Game']
+    assert {tuple(e.platform_ids) for e in example_entities}=={('steam',),('twitch',)}
+    assert next(e for e in example_entities if 'twitch' in e.platform_ids).match_method=='unresolved_cross_platform_name'
     assert result.page_opportunities and result.opportunities
     assert all(p.validation_status=='needs_validation' for p in result.page_opportunities)
     assert SnapshotStore(s).load_latest().run_id==result.run_id
@@ -87,7 +90,7 @@ def api(tmp_path):
 def test_empty_shell_and_version(api):
     r=api.get('/')
     assert r.status_code==200 and '今天，什么值得' in r.text
-    assert '/static/styles.css?v=2.1.0rc1' in r.text
+    assert f'/static/styles.css?v={__version__}' in r.text
     assert 'id="download-report" aria-disabled="true"' in r.text
     assert api.get('/api/snapshot').status_code==404
 

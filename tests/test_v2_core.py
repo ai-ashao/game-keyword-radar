@@ -27,17 +27,19 @@ def cluster(entity,title,source='reddit',count=1):
     return mine_questions(entity,signals)
 
 @pytest.mark.parametrize('name',['EXAMPLE GAME','Example-Game','Example™ Game'])
-def test_entity_normalized_match(name):
+def test_entity_normalized_cross_platform_name_requires_review(name):
     r=EntityResolver();a=r.resolve('Example Game','steam','1');b=r.resolve(name,'twitch','2')
-    assert a is b and len(r.entities)==1
+    assert a is not b and len(r.entities)==2
+    assert b.match_method=='unresolved_cross_platform_name' and b.needs_review
 
 def test_entity_exact_platform_id_precedes_name():
     r=EntityResolver();a=r.resolve('Old Name','steam','1');b=r.resolve('New Name','steam','1')
     assert a is b and 'New Name' in a.aliases
 
-def test_entity_alias():
-    r=EntityResolver(overrides=[{'canonical_name':'Example Game','aliases':['EG'],'platform_ids':{'steam':'1'}}])
-    e=r.resolve('EG','twitch','2');assert e.slug=='example-game' and e.match_method=='alias'
+def test_entity_verified_platform_override():
+    r=EntityResolver(overrides=[{'canonical_name':'Example Game','aliases':['EG'],'platform_ids':{'steam':'1','twitch':'2'}}])
+    e=r.resolve('EG','twitch','2')
+    assert e.slug=='example-game' and e.match_method=='platform_id' and not e.needs_review
 
 def test_fuzzy_not_merged():
     r=EntityResolver();a=r.resolve('Example Game','steam','1');b=r.resolve('Example Game II','twitch','2')

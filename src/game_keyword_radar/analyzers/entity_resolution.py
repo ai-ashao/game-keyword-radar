@@ -20,6 +20,12 @@ def slugify(name: str) -> str:
 
 
 class EntityResolver:
+    """Conservative platform entity resolver.
+
+    V2.2 rule: same platform id is authoritative. Name-only equality across platforms is a
+    review suggestion, not an automatic merge. Verified cross-platform merges belong in
+    entity_overrides, where both platform IDs are explicitly recorded.
+    """
     def __init__(self, existing: list[GameEntity] | None = None, overrides: list[dict] | None = None, *, as_of=None):
         self.as_of = as_of or utc_now()
         self.entities = [e.model_copy(deep=True) for e in (existing or [])]
@@ -33,33 +39,37 @@ class EntityResolver:
             if found:
                 found.aliases = list(dict.fromkeys(found.aliases + entity.aliases))
                 found.platform_ids.update(entity.platform_ids)
+                found.needs_review = False
+                found.match_method = "manual_override"
                 for field in ("subreddits", "youtube_queries", "trends_terms", "mechanics"):
                     if getattr(entity, field):
                         setattr(found, field, getattr(entity, field))
             else:
+                entity.match_method = "manual_override"
+                entity.needs_review = False
                 self.entities.append(entity)
 
     def resolve(self, name: str, platform: str, platform_id: str) -> GameEntity:
         platform_id = str(platform_id)
         match = next((e for e in self.entities if e.platform_ids.get(platform) == platform_id), None)
         method, confidence = "platform_id", 1.0
+        # A different ID on the same platform is also a hard identity conflict.  Names and aliases
+        # are suggestion-only once a platform ID exists; never overwrite an established ID because
+        # two games happen to share a title.
+        unresolved_name_matches = []
         if match is None:
-            candidates = [e for e in self.entities
-                          if e.platform_ids.get(platform) in (None, platform_id)]
-            exact = [e for e in candidates if e.canonical_name.casefold() == name.casefold()]
-            norm = [e for e in candidates if normalized(e.canonical_name) == normalized(name)]
-            aliases = [e for e in candidates if normalized(name) in {normalized(a) for a in e.aliases}]
-            for group, how, score in [(exact,"exact",1.0),(norm,"normalized",.98),(aliases,"alias",.95)]:
-                if len(group) == 1:
-                    match, method, confidence = group[0], how, score
-                    break
-            if match is None:
-                for candidate in candidates:
-                    similarity = SequenceMatcher(None, normalized(name), normalized(candidate.canonical_name)).ratio()
-                    if similarity >= .78:
-                        self.suggestions.append({"name": name, "platform": platform, "platform_id": platform_id,
-                            "candidate_slug": candidate.slug, "similarity": round(similarity,3),
-                            "applied": False})
+            unresolved_name_matches = [e for e in self.entities
+                if (normalized(e.canonical_name) == normalized(name)
+                    or normalized(name) in {normalized(a) for a in e.aliases})]
+            for candidate in self.entities:
+                if candidate in unresolved_name_matches:
+                    continue
+                similarity = SequenceMatcher(None, normalized(name), normalized(candidate.canonical_name)).ratio()
+                if similarity >= .78:
+                    self.suggestions.append({"name": name, "platform": platform, "platform_id": platform_id,
+                        "candidate_slug": candidate.slug, "similarity": round(similarity,3),
+                        "resolution_status": "probable", "applied": False})
+
         if match is None:
             slug = slugify(name)
             if any(e.slug == slug for e in self.entities):
@@ -67,11 +77,24 @@ class EntityResolver:
             match = GameEntity(canonical_name=name, slug=slug)
             self.entities.append(match)
             method, confidence = "new", 1.0
+            if unresolved_name_matches:
+                match.needs_review = True
+                same_platform_conflict = any(platform in candidate.platform_ids for candidate in unresolved_name_matches)
+                match.match_method = "unresolved_platform_id_conflict" if same_platform_conflict else "unresolved_cross_platform_name"
+                match.entity_match_confidence = min(match.entity_match_confidence, 0.5)
+                for candidate in unresolved_name_matches:
+                    reason = "same_platform_different_id" if platform in candidate.platform_ids else "cross_platform_name_only"
+                    self.suggestions.append({"name": name, "platform": platform, "platform_id": platform_id,
+                        "candidate_slug": candidate.slug, "similarity": 1.0,
+                        "resolution_status": "unresolved_entity", "reason": reason,
+                        "applied": False})
+
         match.first_seen_at = match.first_seen_at or self.as_of
         match.first_seen_by_source.setdefault(platform, self.as_of)
         match.platform_ids[platform] = platform_id
-        match.match_method = method
-        match.entity_match_confidence = min(match.entity_match_confidence, confidence)
+        if method != "new" or not unresolved_name_matches:
+            match.match_method = method
+            match.entity_match_confidence = min(match.entity_match_confidence, confidence)
         if name != match.canonical_name and name not in match.aliases:
             match.aliases.append(name)
         return match
@@ -95,8 +118,6 @@ class EntityResolver:
                 precision=game.release_date_precision, source="steam", source_url=game.store_url,
                 checked_at=game.metadata_captured_at or game.collected_at)
             previous = entity.platform_release_dates.get("steam")
-            # An app's later advertised date must not erase an older playable release.
-            # Record the changed platform assertion instead of silently rejuvenating it.
             retain_old = (previous and previous.date and previous.source_url
                           and previous.precision == "day" and previous.date < game.release_date)
             if retain_old:
@@ -112,7 +133,6 @@ class EntityResolver:
                 entity.release_date = game.release_date
         if game.release_stage == "demo" and not any(x.get("kind") == "demo" for x in entity.release_events):
             entity.release_events.append({"kind": "demo", "source_url": str(game.store_url)})
-        # Missing metadata from a failed provider must not destroy an earlier profile.
         if game.genres:
             entity.genres = game.genres
         if game.categories:
